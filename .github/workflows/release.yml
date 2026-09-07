@@ -1,0 +1,65 @@
+name: Release DailyFlow
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Frontend Dependencies
+        run: npm install
+
+      - name: Build Tauri Application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name != '' && github.ref_name || github.event.inputs.version }}
+          releaseName: 'DailyFlow ${{ github.ref_name != '' && github.ref_name || github.event.inputs.version }}'
+          releaseBody: |
+            ## DailyFlow Release 🚀
+            
+            Instaladores multiplataforma disponíveis para download:
+            - **macOS (Apple Silicon & Intel):** `.dmg`
+            - **Windows (x64):** `.exe` (NSIS) e `.msi`
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
