@@ -22,9 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-          - platform: 'windows-latest'
+          - platform: macos-latest
+            targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: windows-latest
+            targets: ''
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -37,12 +39,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.targets }}
 
       - name: Install Frontend Dependencies
         run: npm install
@@ -52,8 +54,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name != '' && github.ref_name || github.event.inputs.version }}
-          releaseName: 'DailyFlow ${{ github.ref_name != '' && github.ref_name || github.event.inputs.version }}'
+          tagName: ${{ github.ref_name || inputs.version || 'v0.1.0' }}
+          releaseName: DailyFlow ${{ github.ref_name || inputs.version || 'v0.1.0' }}
           releaseBody: |
             ## DailyFlow Release 🚀
             
