@@ -133,19 +133,17 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
-                use cocoa::appkit::{NSApp, NSApplication, NSImage};
-                use cocoa::foundation::NSData;
+                use objc2::ClassType;
+                use objc2_app_kit::{NSApplication, NSImage};
+                use objc2_foundation::{MainThreadMarker, NSData};
+
                 unsafe {
+                    let mtm = MainThreadMarker::new_unchecked();
                     let bytes = include_bytes!("../icons/128x128@2x.png");
-                    let data = NSData::dataWithBytes_length_(
-                        cocoa::base::nil,
-                        bytes.as_ptr() as *const std::ffi::c_void,
-                        bytes.len() as u64,
-                    );
-                    let image = NSImage::initWithData_(NSImage::alloc(cocoa::base::nil), data);
-                    if image != cocoa::base::nil {
-                        let ns_app = NSApp();
-                        ns_app.setApplicationIconImage_(image);
+                    let data = NSData::with_bytes(bytes);
+                    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+                        let app = NSApplication::sharedApplication(mtm);
+                        app.setApplicationIconImage(Some(&image));
                     }
                 }
             }
