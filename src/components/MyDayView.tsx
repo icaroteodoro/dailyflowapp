@@ -7,6 +7,7 @@ import {
   Trash2,
   PlusCircle,
   Layers,
+  Zap,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
@@ -17,6 +18,8 @@ export const MyDayView: React.FC = () => {
     removeFromMyDay,
     setSelectedTaskForDetail,
     setActiveTab,
+    completionShortcut,
+    executeCompletionShortcut,
   } = useAppStore();
 
   const total = dailyPlanItems.length;
@@ -29,15 +32,15 @@ export const MyDayView: React.FC = () => {
         <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 text-amber-400">
           <Sun className="w-8 h-8 animate-pulse" />
         </div>
-        <h3 className="text-base font-semibold text-slate-100 mb-1">
-          Seu dia está limpo!
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">
+          Nenhuma tarefa no seu dia ainda
         </h3>
-        <p className="text-xs text-slate-400 max-w-xs mb-5">
-          Selecione as tarefas pendentes do ClickUp que você planeja focar e executar hoje.
+        <p className="text-xs text-zinc-400 max-w-xs mb-5">
+          Selecione tarefas da sua lista geral do ClickUp ou crie uma nova para focar hoje.
         </p>
         <button
           onClick={() => setActiveTab('all-tasks')}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2 px-4 rounded-xl shadow-lg transition-all active:scale-95"
+          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold py-2 px-4 rounded-xl shadow-lg shadow-amber-500/10 transition-all active:scale-95 cursor-pointer"
         >
           <PlusCircle className="w-4 h-4" />
           <span>Adicionar tarefas ao Meu Dia</span>
@@ -50,13 +53,13 @@ export const MyDayView: React.FC = () => {
     <div className="flex-1 flex flex-col overflow-hidden p-3 select-none">
       {/* Progress Bar */}
       <div className="mb-3 px-1">
-        <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5 font-medium">
+        <div className="flex items-center justify-between text-xs text-zinc-400 mb-1.5 font-medium">
           <span>Progresso do dia</span>
-          <span className="text-slate-200 font-bold">{progressPercent}%</span>
+          <span className="text-amber-300 font-bold">{progressPercent}%</span>
         </div>
-        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500 ease-out rounded-full"
+            className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-500 ease-out rounded-full"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
@@ -71,86 +74,87 @@ export const MyDayView: React.FC = () => {
               key={item.id}
               className={`group flex items-start gap-2.5 p-3 rounded-xl border transition-all cursor-pointer ${
                 completedLocally
-                  ? 'bg-slate-900/40 border-white/5 opacity-60'
-                  : 'bg-slate-800/70 hover:bg-slate-800 border-white/10 hover:border-white/20 shadow-sm'
+                  ? 'bg-zinc-950/40 border-white/5 opacity-60'
+                  : 'bg-zinc-900/70 hover:bg-zinc-900 border-white/10 hover:border-white/20 shadow-sm'
               }`}
             >
-              {/* Local Checkbox */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleCompleteLocally(task.id);
                 }}
-                className="mt-0.5 text-slate-400 hover:text-emerald-400 transition-colors focus:outline-none"
-                title={completedLocally ? 'Desmarcar' : 'Concluir no Meu Dia'}
+                className="mt-0.5 text-zinc-400 hover:text-emerald-400 transition-colors focus:outline-none"
               >
-                {completedLocally ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 fill-emerald-400/20" />
+                {item.completedLocally ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                 ) : (
-                  <Circle className="w-4 h-4" />
+                  <Circle className="w-5 h-5" />
                 )}
               </button>
 
               {/* Task Content */}
               <div
-                className="flex-1 min-w-0"
+                className="flex-1 min-w-0 cursor-pointer"
                 onClick={() => setSelectedTaskForDetail(task)}
               >
-                <p
-                  className={`text-xs font-medium leading-snug break-words ${
-                    completedLocally
-                      ? 'line-through text-slate-500'
-                      : 'text-slate-200 group-hover:text-white'
-                  }`}
-                >
-                  {task.title}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <h4
+                    className={`text-xs font-semibold leading-snug break-words transition-colors ${
+                      item.completedLocally
+                        ? 'line-through text-zinc-500'
+                        : 'text-zinc-200 group-hover:text-white'
+                    }`}
+                  >
+                    {task.title}
+                  </h4>
+                </div>
 
-                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {/* Badges / Metadata */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                   {/* Status Badge */}
                   <span
-                    className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border"
+                    className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border border-white/10"
                     style={{
-                      backgroundColor: `${task.status.color || '#64748b'}20`,
-                      borderColor: `${task.status.color || '#64748b'}40`,
-                      color: task.status.color || '#94a3b8',
+                      backgroundColor: `${task.status.color || '#71717a'}20`,
+                      color: task.status.color || '#a1a1aa',
                     }}
                   >
                     {task.status.name}
                   </span>
 
-                  {/* List / Source Name */}
-                  <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                    <Layers className="w-2.5 h-2.5" />
-                    <span className="truncate max-w-[110px]">{task.sourceName}</span>
+                  {/* List / Source */}
+                  <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-white/5">
+                    <Layers className="w-2.5 h-2.5 text-zinc-500" />
+                    <span className="truncate max-w-[120px]">{task.sourceName}</span>
                   </span>
 
                   {/* Due Date */}
                   {task.dueDate && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                      <Clock className="w-2.5 h-2.5" />
+                    <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-white/5">
+                      <Clock className="w-2.5 h-2.5 text-zinc-500" />
                       <span>{task.dueDate}</span>
                     </span>
                   )}
 
                   {/* Assignees */}
                   {task.assignees && task.assignees.length > 0 && (
-                    <div className="flex items-center -space-x-1" title={`Responsável: ${task.assignees.map((a) => a.username).join(', ')}`}>
-                      {task.assignees.map((a) =>
-                        a.avatarUrl ? (
+                    <div className="flex items-center -space-x-1 ml-auto">
+                      {task.assignees.map((assignee) =>
+                        assignee.avatarUrl ? (
                           <img
-                            key={a.id}
-                            src={a.avatarUrl}
-                            alt={a.username}
-                            className="w-4 h-4 rounded-full border border-slate-900 object-cover"
+                            key={assignee.id}
+                            src={assignee.avatarUrl}
+                            alt={assignee.username}
+                            title={assignee.username}
+                            className="w-4 h-4 rounded-full border border-zinc-900 object-cover"
                           />
                         ) : (
                           <div
-                            key={a.id}
-                            className="w-4 h-4 rounded-full text-[8px] font-bold text-white flex items-center justify-center border border-slate-900"
-                            style={{ backgroundColor: a.color || '#3b82f6' }}
+                            key={assignee.id}
+                            title={assignee.username}
+                            className="w-4 h-4 rounded-full text-[8px] font-bold text-zinc-950 bg-zinc-200 flex items-center justify-center border border-zinc-900"
                           >
-                            {a.username.substring(0, 1).toUpperCase()}
+                            {assignee.username.substring(0, 1).toUpperCase()}
                           </div>
                         )
                       )}
@@ -160,14 +164,26 @@ export const MyDayView: React.FC = () => {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+              <div className="flex items-center gap-1">
+                {/* ⚡ Quick Completion Shortcut Button (Semantic: Orange) */}
+                {completionShortcut && completionShortcut.isEnabled && (
+                  <button
+                    type="button"
+                    title={`Finalizar no ClickUp: ${completionShortcut.name || 'Atalho'}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      executeCompletionShortcut(task.id);
+                    }}
+                    className="p-1 rounded bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-zinc-950 transition-all border border-orange-500/30 active:scale-95 cursor-pointer shadow-xs"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFromMyDay(task.id);
-                  }}
-                  className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-700/50 transition-colors"
+                  onClick={() => removeFromMyDay(task.id)}
                   title="Remover do Meu Dia"
+                  className="p-1 rounded text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>

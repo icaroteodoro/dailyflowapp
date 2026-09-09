@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { ActiveTab, DailyPlanItem, ExternalTask, IntegrationConfig } from '../types';
+import { ActiveTab, CompletionShortcut, DailyPlanItem, ExternalTask, IntegrationConfig, ToastNotification } from '../types';
 import { TaskSource } from '../providers/TaskProvider';
 import { TaskRepository } from '../services/taskRepository';
 import { DailyPlanRepository } from '../services/dailyPlanRepository';
 import { SettingsRepository } from '../services/settingsRepository';
+import { CompletionService } from '../services/completionService';
 
 interface AppState {
   // UI & Drawer state
@@ -13,6 +14,7 @@ interface AppState {
   searchQuery: string;
   selectedTaskForDetail: ExternalTask | null;
   isQuickCreateOpen: boolean;
+  toast: ToastNotification | null;
   
   // Sync state
   isSyncing: boolean;
@@ -21,6 +23,7 @@ interface AppState {
   // Integrations & Sources
   integration: IntegrationConfig | null;
   availableSources: TaskSource[];
+  completionShortcut: CompletionShortcut | null;
   
   // Data
   tasks: ExternalTask[];
@@ -37,6 +40,8 @@ interface AppState {
   setSearchQuery: (query: string) => void;
   setSelectedTaskForDetail: (task: ExternalTask | null) => void;
   setIsQuickCreateOpen: (open: boolean) => void;
+  showToast: (toast: Omit<ToastNotification, 'id'>) => void;
+  hideToast: () => void;
   
   // Task Actions
   setTasks: (tasks: ExternalTask[]) => void;
@@ -52,6 +57,10 @@ interface AppState {
   // Task Updates
   updateTaskStatus: (taskId: string, newStatusName: string) => void;
   
+  // Completion Shortcut Automation
+  setCompletionShortcut: (shortcut: CompletionShortcut) => Promise<void>;
+  executeCompletionShortcut: (taskId: string) => Promise<boolean>;
+
   // Sync
   setSyncing: (syncing: boolean) => void;
   setLastSyncTime: (time: string) => void;
@@ -66,11 +75,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedTaskForDetail: null,
   isQuickCreateOpen: false,
   
+  toast: null,
+  
   isSyncing: false,
   lastSyncTime: null,
   
   integration: null,
   availableSources: [],
+  completionShortcut: null,
   tasks: [],
   dailyPlanItems: [],
   selectedTaskIdsForMyDay: new Set<string>(),
@@ -78,10 +90,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadLocalData: async () => {
     const today = new Date().toISOString().split('T')[0];
     try {
-      const [cachedTasks, dailyPlan, integration] = await Promise.all([
+      const [cachedTasks, dailyPlan, integration, shortcut] = await Promise.all([
         TaskRepository.getAllTasks(),
         DailyPlanRepository.getDailyPlan(today),
         SettingsRepository.getIntegration(),
+        SettingsRepository.getCompletionShortcut(),
       ]);
 
       if (cachedTasks.length > 0) {
@@ -92,6 +105,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (integration) {
         set({ integration, lastSyncTime: integration.lastSyncAt });
+      }
+      if (shortcut) {
+        set({ completionShortcut: shortcut });
       }
 
       // Restore sources from local cache if saved
@@ -129,6 +145,70 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSelectedTaskForDetail: (task) => set({ selectedTaskForDetail: task }),
   setIsQuickCreateOpen: (isQuickCreateOpen) => set({ isQuickCreateOpen }),
+  
+  showToast: (toastData) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    set({ toast: { ...toastData, id } });
+    setTimeout(() => {
+      if (get().toast?.id === id) {
+        set({ toast: null });
+      }
+    }, 4000);
+  },
+  hideToast: () => set({ toast: null }),
+
+  setCompletionShortcut: async (shortcut) => {
+    set({ completionShortcut: shortcut });
+    await SettingsRepository.saveCompletionShortcut(shortcut);
+  },
+
+  executeCompletionShortcut: async (taskId) => {
+    const state = get();
+    const task = state.tasks.find((t) => t.id === taskId) ||
+      state.dailyPlanItems.find((i) => i.task.id === taskId)?.task;
+
+    if (!task) return false;
+
+    // Load or fallback to default shortcut if none set
+    let shortcut = state.completionShortcut;
+    if (!shortcut) {
+      shortcut = await SettingsRepository.getCompletionShortcut();
+      if (shortcut) set({ completionShortcut: shortcut });
+    }
+
+    if (!shortcut) {
+      shortcut = {
+        id: 'default',
+        name: 'Finalizar Tarefa',
+        targetStatus: 'COMPLETE',
+        commentTemplate: 'Tarefa finalizada com sucesso! 🚀',
+        isEnabled: true,
+      };
+    }
+
+    const targetStatus = shortcut.targetStatus || 'COMPLETE';
+
+    // 1. Optimistic Update no Store: atualizar status e marcar como concluído no Meu Dia
+    state.updateTaskStatus(taskId, targetStatus);
+    
+    // Se estiver no Meu Dia, marca como completado localmente também
+    const itemInMyDay = state.dailyPlanItems.find((i) => i.task.id === taskId);
+    if (itemInMyDay && !itemInMyDay.completedLocally) {
+      state.toggleCompleteLocally(taskId);
+    }
+
+    // 2. Executa a orquestração remota e comentários via CompletionService
+    const result = await CompletionService.executeShortcut(task, shortcut);
+
+    // 3. Exibir Toast de feedback
+    state.showToast({
+      type: result.success ? 'success' : 'warning',
+      title: '⚡ Automação Executada',
+      message: result.message,
+    });
+
+    return result.success;
+  },
   
   setTasks: (tasks) => {
     set({ tasks });

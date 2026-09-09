@@ -7,6 +7,7 @@ import {
   Layers,
   Clock,
   RefreshCw,
+  Zap,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { SyncService } from '../services/syncService';
@@ -24,6 +25,8 @@ export const AllTasksView: React.FC = () => {
     clearSelectedTaskIds,
     isSyncing,
     setActiveTab,
+    completionShortcut,
+    executeCompletionShortcut,
   } = useAppStore();
 
   const [activeStatusFilter, setActiveStatusFilter] = useState<string>('ALL');
@@ -98,13 +101,13 @@ export const AllTasksView: React.FC = () => {
     <div className="flex-1 flex flex-col overflow-hidden p-3 select-none">
       {/* Search Input */}
       <div className="relative mb-2">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Buscar tarefas, listas ou espaços..."
-          className="w-full pl-9 pr-3 py-2 bg-slate-950/60 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all"
+          className="w-full pl-9 pr-3 py-2 bg-zinc-950/80 border border-white/10 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400/60 focus:ring-1 focus:ring-zinc-400/30 transition-all"
         />
       </div>
 
@@ -113,10 +116,10 @@ export const AllTasksView: React.FC = () => {
         <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none">
           <button
             onClick={() => setActiveStatusFilter('ALL')}
-            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-all shrink-0 ${
+            className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer ${
               activeStatusFilter === 'ALL'
-                ? 'bg-blue-600 text-white border-blue-500'
-                : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-slate-200'
+                ? 'bg-zinc-100 text-zinc-950 border-zinc-200 font-bold shadow-xs'
+                : 'bg-zinc-900/80 text-zinc-400 border-white/5 hover:text-zinc-200'
             }`}
           >
             Todos ({tasks.length})
@@ -129,10 +132,10 @@ export const AllTasksView: React.FC = () => {
               <button
                 key={st}
                 onClick={() => setActiveStatusFilter(st)}
-                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-all shrink-0 ${
+                className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all shrink-0 cursor-pointer ${
                   isSelected
-                    ? 'bg-blue-600 text-white border-blue-500'
-                    : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-slate-200'
+                    ? 'bg-zinc-100 text-zinc-950 border-zinc-200 font-bold shadow-xs'
+                    : 'bg-zinc-900/80 text-zinc-400 border-white/5 hover:text-zinc-200'
                 }`}
               >
                 {st} ({count})
@@ -145,20 +148,20 @@ export const AllTasksView: React.FC = () => {
       {/* Task List grouped */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {Object.keys(groupedTasks).length === 0 ? (
-          <div className="py-12 flex flex-col items-center justify-center text-center text-slate-400 gap-3">
+          <div className="py-12 flex flex-col items-center justify-center text-center text-zinc-400 gap-3">
             <p className="text-xs">Nenhuma tarefa encontrada para os filtros aplicados.</p>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => SyncService.syncNow()}
                 disabled={isSyncing}
-                className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5 shadow-sm transition-all"
+                className="text-xs bg-zinc-100 hover:bg-white text-zinc-950 font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 <span>Sincronizar tarefas agora</span>
               </button>
               <button
                 onClick={() => setActiveTab('settings')}
-                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl transition-all"
+                className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer"
               >
                 Ajustar listas
               </button>
@@ -168,27 +171,27 @@ export const AllTasksView: React.FC = () => {
           Object.entries(groupedTasks).map(([groupKey, group]) => (
             <div key={groupKey} className="space-y-1.5">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold px-1 flex-wrap">
-                <Layers className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <Layers className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                 {group.workspaceName && (
                   <>
-                    <span className="text-purple-400 font-bold">{group.workspaceName}</span>
-                    <span className="text-slate-600">›</span>
+                    <span className="text-zinc-200 font-bold">{group.workspaceName}</span>
+                    <span className="text-zinc-600">›</span>
                   </>
                 )}
                 {group.spaceName && (
                   <>
-                    <span className="text-slate-300 font-medium">{group.spaceName}</span>
-                    <span className="text-slate-600">›</span>
+                    <span className="text-zinc-300 font-medium">{group.spaceName}</span>
+                    <span className="text-zinc-600">›</span>
                   </>
                 )}
                 {group.folderName && (
                   <>
-                    <span className="text-slate-400 font-medium">{group.folderName}</span>
-                    <span className="text-slate-600">›</span>
+                    <span className="text-zinc-400 font-medium">{group.folderName}</span>
+                    <span className="text-zinc-600">›</span>
                   </>
                 )}
-                <span className="text-blue-300 font-bold">{group.sourceName}</span>
-                <span className="text-slate-500 font-normal">({group.tasks.length})</span>
+                <span className="text-zinc-100 font-bold">{group.sourceName}</span>
+                <span className="text-zinc-500 font-normal">({group.tasks.length})</span>
               </div>
 
               <div className="space-y-1.5">
@@ -202,8 +205,8 @@ export const AllTasksView: React.FC = () => {
                       onClick={() => setSelectedTaskForDetail(task)}
                       className={`group flex items-start gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-blue-950/40 border-blue-500/30'
-                          : 'bg-slate-800/60 hover:bg-slate-800 border-white/5 hover:border-white/15'
+                          ? 'bg-zinc-800/80 border-white/20'
+                          : 'bg-zinc-900/60 hover:bg-zinc-900 border-white/5 hover:border-white/15'
                       }`}
                     >
                       {/* Selection Checkbox */}
@@ -218,10 +221,10 @@ export const AllTasksView: React.FC = () => {
                         disabled={isAlreadyInMyDay}
                         className={`mt-0.5 transition-colors focus:outline-none ${
                           isAlreadyInMyDay
-                            ? 'text-amber-400/60 cursor-default'
+                            ? 'text-amber-400/70 cursor-default'
                             : isSelected
-                            ? 'text-blue-400'
-                            : 'text-slate-500 hover:text-slate-300'
+                            ? 'text-amber-400'
+                            : 'text-zinc-500 hover:text-zinc-300'
                         }`}
                         title={
                           isAlreadyInMyDay
@@ -242,25 +245,24 @@ export const AllTasksView: React.FC = () => {
 
                       {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-slate-200 group-hover:text-white leading-snug">
+                        <p className="text-xs font-medium text-zinc-200 group-hover:text-white leading-snug">
                           {task.title}
                         </p>
 
                         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           <span
-                            className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-md border"
+                            className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border border-white/10"
                             style={{
-                              backgroundColor: `${task.status.color || '#64748b'}20`,
-                              borderColor: `${task.status.color || '#64748b'}40`,
-                              color: task.status.color || '#94a3b8',
+                              backgroundColor: `${task.status.color || '#71717a'}20`,
+                              color: task.status.color || '#a1a1aa',
                             }}
                           >
                             {task.status.name}
                           </span>
 
                           {task.dueDate && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 bg-slate-900/60 px-1.5 py-0.5 rounded border border-white/5">
-                              <Clock className="w-2.5 h-2.5" />
+                            <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-white/5">
+                              <Clock className="w-2.5 h-2.5 text-zinc-500" />
                               <span>{task.dueDate}</span>
                             </span>
                           )}
@@ -273,13 +275,12 @@ export const AllTasksView: React.FC = () => {
                                     key={a.id}
                                     src={a.avatarUrl}
                                     alt={a.username}
-                                    className="w-4 h-4 rounded-full border border-slate-900 object-cover"
+                                    className="w-4 h-4 rounded-full border border-zinc-900 object-cover"
                                   />
                                 ) : (
                                   <div
                                     key={a.id}
-                                    className="w-4 h-4 rounded-full text-[8px] font-bold text-white flex items-center justify-center border border-slate-900"
-                                    style={{ backgroundColor: a.color || '#3b82f6' }}
+                                    className="w-4 h-4 rounded-full text-[8px] font-bold text-zinc-950 bg-zinc-200 flex items-center justify-center border border-zinc-900"
                                   >
                                     {a.username.substring(0, 1).toUpperCase()}
                                   </div>
@@ -289,13 +290,31 @@ export const AllTasksView: React.FC = () => {
                           )}
 
                           {isAlreadyInMyDay && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                              <Sun className="w-2.5 h-2.5" />
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-medium">
+                              <Sun className="w-2.5 h-2.5 text-amber-400" />
                               <span>No Meu Dia</span>
                             </span>
                           )}
                         </div>
                       </div>
+
+                      {/* Quick Automation Complete Button (Semantic: Orange) */}
+                      {(!completionShortcut || completionShortcut.isEnabled) && (
+                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              executeCompletionShortcut(task.id);
+                            }}
+                            className="p-1 rounded bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-zinc-950 transition-all border border-orange-500/30 active:scale-95 cursor-pointer shadow-xs"
+                            title={`Finalizar com Atalho ClickUp ⚡ (Status: ${completionShortcut?.targetStatus || 'COMPLETE'}${
+                              completionShortcut?.assigneeToMentionName ? ` | Notificar: @${completionShortcut.assigneeToMentionName}` : ''
+                            })`}
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -307,23 +326,23 @@ export const AllTasksView: React.FC = () => {
 
       {/* Floating Bottom Action Bar */}
       {selectedCount > 0 && (
-        <div className="pt-2 border-t border-white/10 mt-2 flex items-center justify-between gap-2 bg-slate-900/90 rounded-xl p-2">
-          <span className="text-xs text-slate-300 font-medium pl-1">
+        <div className="pt-2 border-t border-white/10 mt-2 flex items-center justify-between gap-2 bg-zinc-900 border border-white/10 rounded-xl p-2 shadow-xl">
+          <span className="text-xs text-zinc-300 font-medium pl-1">
             {selectedCount} {selectedCount === 1 ? 'tarefa selecionada' : 'tarefas selecionadas'}
           </span>
           
           <div className="flex items-center gap-1.5">
             <button
               onClick={clearSelectedTaskIds}
-              className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1.5 rounded-lg transition-colors"
+              className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               Cancelar
             </button>
             <button
               onClick={handleAddSelected}
-              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold py-1.5 px-3 rounded-lg shadow-md transition-all active:scale-95"
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold py-1.5 px-3.5 rounded-lg shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
             >
-              <Sun className="w-3.5 h-3.5 fill-slate-950" />
+              <Sun className="w-3.5 h-3.5 fill-zinc-950" />
               <span>Adicionar ao Meu Dia</span>
             </button>
           </div>

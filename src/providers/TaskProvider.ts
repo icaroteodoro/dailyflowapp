@@ -76,7 +76,12 @@ export interface ITaskProvider {
   /**
    * Adiciona um comentário a uma tarefa no provedor remoto
    */
-  createComment(token: string, taskId: string, comment: string): Promise<void>;
+  createComment(
+    token: string,
+    taskId: string,
+    comment: string,
+    options?: { notifyAssigneeId?: string; assigneeName?: string }
+  ): Promise<void>;
 
   /**
    * Cria uma nova tarefa na lista especificada

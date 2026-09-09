@@ -11,22 +11,23 @@ export const DrawerHandle: React.FC = () => {
   return (
     <div
       onClick={toggleExpanded}
-      className="w-full h-full cursor-pointer select-none flex flex-col items-center justify-center bg-[#0f172a] hover:bg-slate-800 text-slate-200 border-l border-y border-white/10 rounded-l-2xl shadow-2xl transition-all active:scale-95"
+      className="w-full h-full cursor-pointer select-none flex flex-col items-center justify-center bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border-l border-y border-white/10 rounded-l-2xl shadow-2xl transition-all active:scale-95"
       title="Clique para expandir o DailyFlow"
     >
       <div className="flex flex-col items-center gap-2 py-1">
         <Sun className="w-5 h-5 text-amber-400 animate-pulse" />
 
         {uncompletedCount > 0 && (
-          <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full shadow-sm">
+          <span className="bg-amber-500 text-zinc-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full shadow-sm">
             {uncompletedCount}
           </span>
         )}
 
-        <div className="w-1 h-4 bg-slate-700 rounded-full my-0.5" />
+        <div className="w-1 h-4 bg-zinc-700 rounded-full my-0.5" />
 
-        <ChevronLeft className="w-4 h-4 text-slate-400" />
+        <ChevronLeft className="w-4 h-4 text-zinc-400" />
       </div>
     </div>
   );
 };
+

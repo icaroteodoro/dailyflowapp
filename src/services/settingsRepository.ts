@@ -150,4 +150,60 @@ export const SettingsRepository = {
       console.warn('Error deleting integration from SQLite:', error);
     }
   },
+
+  /**
+   * Salva a configuração de atalho e automação de finalização
+   */
+  async saveCompletionShortcut(shortcut: import('../types').CompletionShortcut): Promise<void> {
+    try {
+      localStorage.setItem('dailyflow_completion_shortcut', JSON.stringify(shortcut));
+      const db = await getDatabase();
+      await db.execute(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)`,
+        ['completion_shortcut', JSON.stringify(shortcut)]
+      );
+    } catch (error) {
+      console.warn('Error saving completion shortcut:', error);
+    }
+  },
+
+  /**
+   * Recupera a configuração do atalho de finalização
+   */
+  async getCompletionShortcut(): Promise<import('../types').CompletionShortcut | null> {
+    const defaultShortcut: import('../types').CompletionShortcut = {
+      id: 'default_shortcut',
+      name: 'Finalizar e Notificar',
+      targetStatus: 'COMPLETE',
+      targetStatusColor: '#10b981',
+      commentTemplate: 'Olá @{member}, a tarefa foi finalizada com sucesso e está pronta para revisão! 🚀',
+      isEnabled: true,
+    };
+
+    try {
+      // 1. Try SQLite
+      try {
+        const db = await getDatabase();
+        const rows = await db.select<Array<{ key: string; value: string }>>(
+          `SELECT value FROM settings WHERE key = 'completion_shortcut' LIMIT 1`
+        );
+        if (rows.length > 0 && rows[0].value) {
+          return { ...defaultShortcut, ...JSON.parse(rows[0].value) };
+        }
+      } catch {
+        // fallback
+      }
+
+      // 2. Try localStorage
+      const cached = localStorage.getItem('dailyflow_completion_shortcut');
+      if (cached) {
+        return { ...defaultShortcut, ...JSON.parse(cached) };
+      }
+    } catch {
+      // ignore
+    }
+
+    return defaultShortcut;
+  },
 };
+
