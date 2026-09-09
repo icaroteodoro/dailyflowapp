@@ -125,6 +125,31 @@ pub fn run() {
         )
         .setup(|app| {
             let handle = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::appkit::{NSApp, NSApplication, NSImage};
+                use cocoa::foundation::NSData;
+                unsafe {
+                    let bytes = include_bytes!("../icons/128x128@2x.png");
+                    let data = NSData::dataWithBytes_length_(
+                        cocoa::base::nil,
+                        bytes.as_ptr() as *const std::ffi::c_void,
+                        bytes.len() as u64,
+                    );
+                    let image = NSImage::initWithData_(NSImage::alloc(cocoa::base::nil), data);
+                    if image != cocoa::base::nil {
+                        let ns_app = NSApp();
+                        ns_app.setApplicationIconImage_(image);
+                    }
+                }
+            }
+
             let _ = set_drawer_state(handle, true);
             Ok(())
         })

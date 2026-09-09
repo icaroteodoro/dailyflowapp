@@ -408,11 +408,63 @@ export class ClickUpProvider implements ITaskProvider {
     });
   }
 
-  async createComment(token: string, taskId: string, comment: string): Promise<void> {
+  async createComment(
+    token: string,
+    taskId: string,
+    comment: string,
+    options?: { notifyAssigneeId?: string; assigneeName?: string }
+  ): Promise<void> {
     const rawId = taskId.replace('clickup:', '');
+    const userId = options?.notifyAssigneeId ? Number(options.notifyAssigneeId) : null;
+
+    let payload: any;
+
+    if (userId && !isNaN(userId)) {
+      let before = '';
+      let after = '';
+      const mentionToken = options?.assigneeName ? `@${options.assigneeName}` : '';
+
+      if (mentionToken && comment.includes(mentionToken)) {
+        const idx = comment.indexOf(mentionToken);
+        before = comment.substring(0, idx);
+        after = comment.substring(idx + mentionToken.length);
+      } else {
+        const atIndex = comment.indexOf('@');
+        if (atIndex !== -1) {
+          before = comment.substring(0, atIndex);
+          const rest = comment.substring(atIndex);
+          const match = rest.match(/^@[^,\.!?\n]+/);
+          const tagLength = match ? match[0].length : 1;
+          after = rest.substring(tagLength);
+        } else {
+          after = ` ${comment}`;
+        }
+      }
+
+      // Quando enviamos o array 'comment', NÃO devemos enviar 'comment_text' para evitar duplicação no ClickUp
+      payload = {
+        comment: [
+          ...(before ? [{ text: before }] : []),
+          {
+            type: 'tag',
+            user: {
+              id: userId,
+            },
+          },
+          ...(after ? [{ text: after }] : []),
+        ],
+        notify_all: true,
+      };
+    } else {
+      payload = {
+        comment_text: comment,
+        notify_all: true,
+      };
+    }
+
     await this.request(`/task/${rawId}/comment`, token, {
       method: 'POST',
-      body: JSON.stringify({ comment_text: comment }),
+      body: JSON.stringify(payload),
     });
   }
 

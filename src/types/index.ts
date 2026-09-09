@@ -71,4 +71,24 @@ export interface TaskComment {
   createdAt: string;
 }
 
+export interface CompletionShortcut {
+  id: string;
+  name: string;
+  targetStatus: string;
+  targetStatusColor?: string;
+  assigneeToMentionId?: string;
+  assigneeToMentionName?: string;
+  assigneeToMentionAvatar?: string;
+  commentTemplate: string;
+  isEnabled: boolean;
+}
+
+export interface ToastNotification {
+  id: string;
+  type: 'success' | 'info' | 'warning' | 'error';
+  title: string;
+  message?: string;
+}
+
 export type ActiveTab = 'my-day' | 'all-tasks' | 'settings';
+

@@ -2,15 +2,15 @@
 
 @layer base {
   :root {
-    --bg-primary: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-card: rgba(30, 41, 59, 0.85);
+    --bg-primary: #09090b;
+    --bg-secondary: #18181b;
+    --bg-card: rgba(24, 24, 27, 0.85);
     --border-color: rgba(255, 255, 255, 0.08);
-    --text-primary: #f8fafc;
-    --text-muted: #94a3b8;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-glow: rgba(59, 130, 246, 0.25);
+    --text-primary: #fafafa;
+    --text-muted: #a1a1aa;
+    --accent: #f4f4f5;
+    --accent-hover: #ffffff;
+    --accent-glow: rgba(255, 255, 255, 0.15);
   }
 
   * {
@@ -33,19 +33,19 @@
 
 /* Glassmorphism & solid panels */
 .glass-panel {
-  background-color: #0f172a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #09090b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .glass-card {
-  background: rgba(30, 41, 59, 0.7);
+  background: rgba(24, 24, 27, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-card:hover {
-  background: rgba(51, 65, 85, 0.8);
+  background: rgba(39, 39, 42, 0.8);
   border-color: rgba(255, 255, 255, 0.12);
 }
 

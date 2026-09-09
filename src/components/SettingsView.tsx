@@ -21,6 +21,10 @@ import {
   Users,
   UserCheck,
   Save,
+  Zap,
+  MessageSquare,
+  AtSign,
+  Tag,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { KeychainService } from '../services/keychain';
@@ -28,7 +32,7 @@ import { SettingsRepository } from '../services/settingsRepository';
 import { ProviderFactory } from '../providers/ProviderFactory';
 import { TaskSource, Workspace } from '../providers/TaskProvider';
 import { SyncService } from '../services/syncService';
-import { IntegrationConfig, TaskAssignee } from '../types';
+import { CompletionShortcut, IntegrationConfig, TaskAssignee } from '../types';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -37,6 +41,8 @@ export const SettingsView: React.FC = () => {
     isSyncing,
     availableSources,
     setAvailableSources,
+    completionShortcut,
+    setCompletionShortcut,
   } = useAppStore();
 
   const [token, setToken] = useState('');
@@ -70,6 +76,18 @@ export const SettingsView: React.FC = () => {
 
   const [memberSearch, setMemberSearch] = useState('');
 
+  // Completion Shortcut Automation State
+  const [shortcutEnabled, setShortcutEnabled] = useState<boolean>(true);
+  const [shortcutName, setShortcutName] = useState<string>('Finalizar e Notificar');
+  const [shortcutTargetStatus, setShortcutTargetStatus] = useState<string>('COMPLETE');
+  const [shortcutAssigneeId, setShortcutAssigneeId] = useState<string>('');
+  const [shortcutCommentTemplate, setShortcutCommentTemplate] = useState<string>(
+    'Olá @{member}, a tarefa foi finalizada com sucesso e está pronta para revisão! 🚀'
+  );
+  const [isSavingShortcut, setIsSavingShortcut] = useState<boolean>(false);
+  const [shortcutSavedMessage, setShortcutSavedMessage] = useState<string | null>(null);
+  const [shortcutMemberFilter, setShortcutMemberFilter] = useState<string>('');
+
   // App Preferences State
   const [autostart, setAutostart] = useState(true);
   const [globalShortcut, setGlobalShortcut] = useState(true);
@@ -95,6 +113,31 @@ export const SettingsView: React.FC = () => {
         setSelectedStatuses(integration.selectedStatuses || []);
         setHideDoneTasks(integration.hideDoneTasks ?? false);
         setWizardStep(0); // Show summary
+
+        // Carregar membros se ainda não carregados
+        if (savedToken) {
+          try {
+            const provider = ProviderFactory.getProvider('clickup');
+            const [members, user] = await Promise.all([
+              provider.getWorkspaceMembers(savedToken, integration.selectedWorkspaceIds),
+              provider.getCurrentUser(savedToken),
+            ]);
+            setAvailableMembers(members);
+            setCurrentUser(user);
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Load completion shortcut
+      const shortcut = await SettingsRepository.getCompletionShortcut();
+      if (shortcut) {
+        setShortcutEnabled(shortcut.isEnabled);
+        setShortcutName(shortcut.name || 'Finalizar e Notificar');
+        setShortcutTargetStatus(shortcut.targetStatus || 'COMPLETE');
+        setShortcutAssigneeId(shortcut.assigneeToMentionId || '');
+        setShortcutCommentTemplate(shortcut.commentTemplate || '');
       }
 
       // Load app preferences
@@ -433,36 +476,47 @@ export const SettingsView: React.FC = () => {
     return acc;
   }, {});
 
-  // Distinct statuses for Step 3
+  // Distinct statuses for Filter Step 4 & Automation Shortcut
   const selectedSourcesList = availableSources.filter((s) => selectedSourceIds.includes(s.id));
+  const sourcesForStatuses = selectedSourcesList.length > 0 ? selectedSourcesList : availableSources;
   const distinctStatuses = Array.from(
     new Set(
-      selectedSourcesList.flatMap((s) => (s.statuses || []).map((st) => st.name.toUpperCase()))
+      sourcesForStatuses.flatMap((s) => (s.statuses || []).map((st) => st.name.toUpperCase()))
     )
   );
+
+  // Garantir que o status selecionado para o atalho pertence aos status reais do workspace
+  useEffect(() => {
+    if (distinctStatuses.length > 0 && !distinctStatuses.includes(shortcutTargetStatus.toUpperCase())) {
+      const defaultDone = distinctStatuses.find((s) =>
+        ['COMPLETE', 'DONE', 'FECHADO', 'RESOLVIDO', 'FINALIZADO'].includes(s)
+      );
+      setShortcutTargetStatus(defaultDone || distinctStatuses[0]);
+    }
+  }, [distinctStatuses.join(','), shortcutTargetStatus]);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4 select-none">
       {/* Header */}
       <div>
-        <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
           <span>Configurações & Sincronização</span>
         </h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <p className="text-xs text-zinc-400 mt-0.5">
           Filtros de Workspaces, Listas e Status para a aba Tarefas.
         </p>
       </div>
 
       {/* Main Integration Card */}
-      <div className="p-3.5 bg-slate-950/60 border border-white/10 rounded-2xl space-y-3">
+      <div className="p-3.5 bg-zinc-900 border border-white/10 rounded-2xl space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center text-white font-bold text-xs shadow-md">
+            <div className="w-7 h-7 rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center text-zinc-100 font-bold text-xs shadow-md">
               CU
             </div>
             <div>
-              <h3 className="text-xs font-semibold text-slate-200">ClickUp</h3>
-              <p className="text-[10px] text-slate-400">Integração Oficial de Tarefas</p>
+              <h3 className="text-xs font-semibold text-zinc-200">ClickUp</h3>
+              <p className="text-[10px] text-zinc-400">Integração Oficial de Tarefas</p>
             </div>
           </div>
 
@@ -470,7 +524,7 @@ export const SettingsView: React.FC = () => {
             className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
               isConnected
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : 'bg-slate-800 text-slate-400 border-white/5'
+                : 'bg-zinc-800 text-zinc-400 border-white/5'
             }`}
           >
             {isConnected ? (
@@ -488,22 +542,22 @@ export const SettingsView: React.FC = () => {
         {!isConnected && wizardStep === 0 && (
           <form onSubmit={handleStartWizard} className="space-y-2.5 pt-1">
             <div>
-              <label className="text-[11px] font-medium text-slate-300 block mb-1">
+              <label className="text-[11px] font-medium text-zinc-300 block mb-1">
                 Personal API Token do ClickUp
               </label>
               <div className="relative">
-                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                 <input
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="pk_12345678_..."
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  className="w-full pl-8 pr-3 py-1.5 bg-zinc-950 border border-white/10 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400"
                 />
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <div className="flex items-center justify-between text-[10px] text-zinc-400">
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3 text-emerald-400" />
                 Salvo com segurança no Keychain
@@ -511,7 +565,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="submit"
                 disabled={isValidating || !token.trim()}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1 active:scale-95 cursor-pointer"
+                className="bg-zinc-100 hover:bg-white disabled:opacity-50 text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1 active:scale-95 cursor-pointer"
               >
                 <Link className="w-3 h-3" />
                 <span>{isValidating ? 'Validando...' : 'Iniciar Configuração'}</span>
@@ -524,8 +578,8 @@ export const SettingsView: React.FC = () => {
         {wizardStep === 1 && (
           <div className="space-y-3 pt-1 animate-in fade-in duration-150">
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <Briefcase className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
                 <span>
                   Etapa 1 de 3: Selecione os Workspaces ({selectedWorkspaceIds.length}/{availableWorkspaces.length})
                 </span>
@@ -536,7 +590,7 @@ export const SettingsView: React.FC = () => {
                   onClick={() =>
                     toggleAllWorkspaces(selectedWorkspaceIds.length !== availableWorkspaces.length)
                   }
-                  className="text-[10px] text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
+                  className="text-[10px] text-zinc-300 hover:text-white font-medium cursor-pointer"
                 >
                   {selectedWorkspaceIds.length === availableWorkspaces.length
                     ? 'Desmarcar todos'
@@ -545,7 +599,7 @@ export const SettingsView: React.FC = () => {
               )}
             </div>
 
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-zinc-400">
               Você pode selecionar um ou múltiplos workspaces para sincronizar simultaneamente:
             </p>
 
@@ -558,8 +612,8 @@ export const SettingsView: React.FC = () => {
                     onClick={() => toggleWorkspace(ws.id)}
                     className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
                       isSelected
-                        ? 'bg-blue-950/40 border-blue-500/40 text-white'
-                        : 'bg-slate-900/60 border-white/5 hover:border-white/15 text-slate-400'
+                        ? 'bg-zinc-800 border-white/20 text-white'
+                        : 'bg-zinc-950/60 border-white/5 hover:border-white/15 text-zinc-400'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -567,11 +621,11 @@ export const SettingsView: React.FC = () => {
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => {}}
-                        className="rounded bg-slate-950 border-white/20 text-blue-600 cursor-pointer"
+                        className="rounded bg-zinc-950 border-white/20 text-zinc-200 cursor-pointer accent-zinc-200"
                       />
-                      <span className="text-xs font-medium text-slate-200">{ws.name}</span>
+                      <span className="text-xs font-medium text-zinc-200">{ws.name}</span>
                     </div>
-                    <span className="text-[10px] text-slate-500">ID: {ws.id}</span>
+                    <span className="text-[10px] text-zinc-500">ID: {ws.id}</span>
                   </label>
                 );
               })}
@@ -582,7 +636,7 @@ export const SettingsView: React.FC = () => {
                 type="button"
                 onClick={handleProceedToLists}
                 disabled={isLoadingStep || selectedWorkspaceIds.length === 0}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <span>{isLoadingStep ? 'Carregando listas...' : 'Avançar para Listas'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -591,27 +645,28 @@ export const SettingsView: React.FC = () => {
           </div>
         )}
 
+
         {/* ----------------- STEP 2: CHOOSE LISTS ----------------- */}
         {wizardStep === 2 && (
           <div className="space-y-3 pt-1 animate-in fade-in duration-150">
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Etapa 2 de 3: Selecione as Listas</span>
               </span>
-              <span className="text-[10px] text-slate-400 font-medium">
+              <span className="text-[10px] text-zinc-400 font-medium">
                 {selectedSourceIds.length} selecionada(s)
               </span>
             </div>
 
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500" />
               <input
                 type="text"
                 value={listSearch}
                 onChange={(e) => setListSearch(e.target.value)}
                 placeholder="Buscar listas ou espaços..."
-                className="w-full pl-7 pr-3 py-1 bg-slate-900 border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                className="w-full pl-7 pr-3 py-1 bg-zinc-950 border border-white/10 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400"
               />
             </div>
 
@@ -622,23 +677,23 @@ export const SettingsView: React.FC = () => {
                 const allSelected = spaceIds.every((id) => selectedSourceIds.includes(id));
 
                 return (
-                  <div key={spaceName} className="rounded-xl bg-slate-900/70 border border-white/5 overflow-hidden">
-                    <div className="flex items-center justify-between p-2 bg-slate-950/40">
+                  <div key={spaceName} className="rounded-xl bg-zinc-950/70 border border-white/5 overflow-hidden">
+                    <div className="flex items-center justify-between p-2 bg-zinc-950">
                       <button
                         type="button"
                         onClick={() =>
                           setExpandedSpaces((prev) => ({ ...prev, [spaceName]: !isExpanded }))
                         }
-                        className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 flex-1 text-left cursor-pointer"
+                        className="flex items-center gap-1.5 text-xs font-semibold text-zinc-200 flex-1 text-left cursor-pointer"
                       >
                         {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                         <span>{spaceName}</span>
-                        <span className="text-[10px] text-slate-500 font-normal">({sources.length})</span>
+                        <span className="text-[10px] text-zinc-500 font-normal">({sources.length})</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => toggleSpaceAll(spaceName, !allSelected)}
-                        className="text-[10px] text-blue-400 hover:text-blue-300 font-medium px-1.5 py-0.5 rounded cursor-pointer"
+                        className="text-[10px] text-zinc-300 hover:text-white font-medium px-1.5 py-0.5 rounded cursor-pointer"
                       >
                         {allSelected ? 'Desmarcar tudo' : 'Marcar tudo'}
                       </button>
@@ -653,7 +708,7 @@ export const SettingsView: React.FC = () => {
                               key={source.id}
                               onClick={() => toggleSource(source.id)}
                               className={`flex items-center justify-between p-1.5 rounded-lg cursor-pointer transition-colors ${
-                                isChecked ? 'bg-blue-950/30 text-slate-200' : 'hover:bg-slate-800/60 text-slate-400'
+                                isChecked ? 'bg-zinc-800 text-zinc-100' : 'hover:bg-zinc-900 text-zinc-400'
                               }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
@@ -661,12 +716,12 @@ export const SettingsView: React.FC = () => {
                                   type="checkbox"
                                   checked={isChecked}
                                   onChange={() => {}}
-                                  className="rounded bg-slate-950 border-white/20 text-blue-600 cursor-pointer"
+                                  className="rounded bg-zinc-950 border-white/20 text-zinc-200 cursor-pointer accent-zinc-200"
                                 />
                                 <span className="text-xs truncate">{source.name}</span>
                               </div>
                               {source.folderName && (
-                                <span className="text-[9px] text-slate-500 bg-slate-950/60 px-1 py-0.2 rounded">
+                                <span className="text-[9px] text-zinc-400 bg-zinc-900 px-1 py-0.2 rounded border border-white/5">
                                   {source.folderName}
                                 </span>
                               )}
@@ -684,7 +739,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setWizardStep(1)}
-                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Voltar</span>
@@ -694,7 +749,7 @@ export const SettingsView: React.FC = () => {
                 type="button"
                 onClick={handleProceedToAssignees}
                 disabled={selectedSourceIds.length === 0 || isLoadingStep}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <span>{isLoadingStep ? 'Carregando usuários...' : 'Avançar para Responsável'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -707,18 +762,18 @@ export const SettingsView: React.FC = () => {
         {wizardStep === 3 && (
           <div className="space-y-3 pt-1 animate-in fade-in duration-150">
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Etapa 3 de 4: Quem é o responsável pelas tarefas?</span>
               </span>
-              <span className="text-[10px] text-slate-400 font-medium">
+              <span className="text-[10px] text-zinc-400 font-medium">
                 {selectedAssigneeIds.length === 0
                   ? 'Qualquer responsável'
                   : `${selectedAssigneeIds.length} selecionado(s)`}
               </span>
             </div>
 
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-zinc-400">
               Escolha de qual usuário você deseja sincronizar tarefas (apenas tarefas marcadas para ele serão importadas):
             </p>
 
@@ -730,16 +785,16 @@ export const SettingsView: React.FC = () => {
                   onClick={() => selectOnlyUser(currentUser.id)}
                   className={`p-2 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer ${
                     selectedAssigneeIds.length === 1 && selectedAssigneeIds[0] === currentUser.id
-                      ? 'bg-blue-950/50 border-blue-500/40 text-white shadow-sm'
-                      : 'bg-slate-900/60 border-white/5 hover:border-white/15 text-slate-300'
+                      ? 'bg-zinc-800 border-white/20 text-white shadow-sm'
+                      : 'bg-zinc-950/60 border-white/5 hover:border-white/15 text-zinc-300'
                   }`}
                 >
-                  <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                  <div className="w-6 h-6 rounded-full bg-zinc-100 text-zinc-950 text-[10px] font-bold flex items-center justify-center shrink-0">
                     <UserCheck className="w-3.5 h-3.5" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-semibold truncate leading-tight">Apenas minhas tarefas</p>
-                    <p className="text-[10px] text-slate-400 truncate">{currentUser.username}</p>
+                    <p className="text-[10px] text-zinc-400 truncate">{currentUser.username}</p>
                   </div>
                 </button>
               )}
@@ -749,16 +804,16 @@ export const SettingsView: React.FC = () => {
                 onClick={selectAllAssignees}
                 className={`p-2 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer ${
                   selectedAssigneeIds.length === 0
-                    ? 'bg-blue-950/50 border-blue-500/40 text-white shadow-sm'
-                    : 'bg-slate-900/60 border-white/5 hover:border-white/15 text-slate-300'
+                    ? 'bg-zinc-800 border-white/20 text-white shadow-sm'
+                    : 'bg-zinc-950/60 border-white/5 hover:border-white/15 text-zinc-300'
                 }`}
               >
-                <div className="w-6 h-6 rounded-full bg-slate-800 text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0">
+                <div className="w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 text-[10px] font-bold flex items-center justify-center shrink-0">
                   <Users className="w-3.5 h-3.5" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-semibold truncate leading-tight">Qualquer responsável</p>
-                  <p className="text-[10px] text-slate-400 truncate">Sem filtro de usuário</p>
+                  <p className="text-[10px] text-zinc-400 truncate">Sem filtro de usuário</p>
                 </div>
               </button>
             </div>
@@ -767,13 +822,13 @@ export const SettingsView: React.FC = () => {
             {availableMembers.length > 0 && (
               <div className="space-y-1.5 pt-1">
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500" />
                   <input
                     type="text"
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
                     placeholder="Buscar membro por nome ou e-mail..."
-                    className="w-full pl-7 pr-3 py-1 bg-slate-900 border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    className="w-full pl-7 pr-3 py-1 bg-zinc-950 border border-white/10 rounded-lg text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400"
                   />
                 </div>
 
@@ -796,8 +851,8 @@ export const SettingsView: React.FC = () => {
                           onClick={() => toggleAssignee(member.id)}
                           className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
                             isSelected
-                              ? 'bg-blue-950/40 border-blue-500/40 text-white'
-                              : 'bg-slate-900/60 border-white/5 hover:border-white/15 text-slate-300'
+                              ? 'bg-zinc-800 border-white/20 text-white'
+                              : 'bg-zinc-950/60 border-white/5 hover:border-white/15 text-zinc-300'
                           }`}
                         >
                           <div className="flex items-center gap-2 min-w-0">
@@ -805,7 +860,7 @@ export const SettingsView: React.FC = () => {
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => {}}
-                              className="rounded bg-slate-950 border-white/20 text-blue-600 cursor-pointer"
+                              className="rounded bg-zinc-950 border-white/20 text-zinc-200 cursor-pointer accent-zinc-200"
                             />
                             {member.avatarUrl ? (
                               <img
@@ -815,8 +870,7 @@ export const SettingsView: React.FC = () => {
                               />
                             ) : (
                               <div
-                                className="w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center shrink-0"
-                                style={{ backgroundColor: member.color || '#3b82f6' }}
+                                className="w-5 h-5 rounded-full text-[10px] font-bold text-zinc-950 bg-zinc-200 flex items-center justify-center shrink-0"
                               >
                                 {member.username.substring(0, 2).toUpperCase()}
                               </div>
@@ -826,7 +880,7 @@ export const SettingsView: React.FC = () => {
                                 {member.username}
                               </span>
                               {member.email && (
-                                <span className="text-[10px] text-slate-500 block truncate">
+                                <span className="text-[10px] text-zinc-500 block truncate">
                                   {member.email}
                                 </span>
                               )}
@@ -834,7 +888,7 @@ export const SettingsView: React.FC = () => {
                           </div>
 
                           {isCurrentUser && (
-                            <span className="text-[9px] font-semibold bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded border border-blue-500/30 shrink-0">
+                            <span className="text-[9px] font-semibold bg-zinc-800 text-zinc-200 px-1.5 py-0.2 rounded border border-white/10 shrink-0">
                               Você
                             </span>
                           )}
@@ -849,7 +903,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setWizardStep(2)}
-                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Voltar para Listas</span>
@@ -858,7 +912,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleProceedToStatuses}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer"
               >
                 <span>Avançar para Status</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -871,18 +925,18 @@ export const SettingsView: React.FC = () => {
         {wizardStep === 4 && (
           <div className="space-y-3 pt-1 animate-in fade-in duration-150">
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <Filter className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Etapa 4 de 4: Escolha os Status das tarefas</span>
               </span>
             </div>
 
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-zinc-400">
               Apenas tarefas com os status marcados abaixo serão importadas para a aba <strong>Tarefas</strong>:
             </p>
 
             {/* Status Pills Selector */}
-            <div className="p-3 bg-slate-900/80 rounded-xl border border-white/5 space-y-2">
+            <div className="p-3 bg-zinc-950/80 rounded-xl border border-white/5 space-y-2">
               <div className="flex flex-wrap gap-1.5">
                 {distinctStatuses.map((st) => {
                   const isChecked = selectedStatuses.includes(st);
@@ -893,8 +947,8 @@ export const SettingsView: React.FC = () => {
                       onClick={() => toggleStatus(st)}
                       className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
                         isChecked
-                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
-                          : 'bg-slate-950 text-slate-400 border-white/10 hover:text-slate-200'
+                          ? 'bg-zinc-100 text-zinc-950 border-white shadow-sm font-bold'
+                          : 'bg-zinc-900 text-zinc-400 border-white/10 hover:text-zinc-200'
                       }`}
                     >
                       {st}
@@ -907,11 +961,11 @@ export const SettingsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedStatuses(distinctStatuses)}
-                  className="text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
+                  className="text-zinc-300 hover:text-white font-medium cursor-pointer"
                 >
                   Selecionar todos
                 </button>
-                <span className="text-slate-600">•</span>
+                <span className="text-zinc-600">•</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -919,7 +973,7 @@ export const SettingsView: React.FC = () => {
                       distinctStatuses.filter((s) => !['DONE', 'CLOSED', 'COMPLETE'].includes(s))
                     )
                   }
-                  className="text-amber-400 hover:text-amber-300 font-medium cursor-pointer"
+                  className="text-zinc-300 hover:text-white font-medium cursor-pointer"
                 >
                   Apenas tarefas em andamento / abertas
                 </button>
@@ -930,7 +984,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setWizardStep(3)}
-                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Voltar para Responsável</span>
@@ -940,30 +994,31 @@ export const SettingsView: React.FC = () => {
                 type="button"
                 onClick={handleFinishSetup}
                 disabled={isLoadingStep || selectedStatuses.length === 0}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-1.5 px-4 rounded-xl transition-all shadow-md flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-4 rounded-xl transition-all shadow-md flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>{isLoadingStep ? 'Sincronizando...' : 'Concluir e Sincronizar 🚀'}</span>
+                <span>{isLoadingStep ? 'Sincronizando...' : 'Concluir e Sincronizar'}</span>
               </button>
             </div>
           </div>
         )}
 
+
         {/* ----------------- SUMMARY VIEW (WHEN CONFIGURED) ----------------- */}
         {isConnected && wizardStep === 0 && (
           <div className="space-y-3 pt-1">
             {/* Active Workspace Info */}
-            <div className="p-3 bg-slate-900/90 rounded-xl border border-white/5 space-y-2">
+            <div className="p-3 bg-zinc-950/80 rounded-xl border border-white/5 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                  <Briefcase className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
                   <span>
                     Workspaces Sincronizados ({integration.selectedWorkspaceIds?.length || 1}):
                   </span>
                 </span>
                 <button
                   onClick={handleOpenWorkspacesStep}
-                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 cursor-pointer transition-colors"
+                  className="text-[10px] text-zinc-300 hover:text-white flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded border border-white/10 cursor-pointer transition-colors"
                 >
                   <Plus className="w-3 h-3" />
                   <span>Gerenciar workspaces</span>
@@ -974,47 +1029,47 @@ export const SettingsView: React.FC = () => {
                   integration.selectedWorkspaceNames.map((name) => (
                     <span
                       key={name}
-                      className="text-[10px] font-semibold bg-purple-950/60 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-md"
+                      className="text-[10px] font-semibold bg-zinc-800 text-zinc-200 border border-white/10 px-2 py-0.5 rounded-md"
                     >
                       {name}
                     </span>
                   ))
                 ) : (
-                  <span className="text-xs font-medium text-slate-300">Workspace Principal</span>
+                  <span className="text-xs font-medium text-zinc-300">Workspace Principal</span>
                 )}
               </div>
             </div>
 
             {/* Synchronized Lists Summary */}
-            <div className="p-3 bg-slate-900/90 rounded-xl border border-white/5 space-y-2">
+            <div className="p-3 bg-zinc-950/80 rounded-xl border border-white/5 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-zinc-400" />
                   <span>Listas Selecionadas:</span>
                 </span>
                 <button
                   onClick={handleProceedToLists}
-                  className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
                 >
                   <SlidersHorizontal className="w-3 h-3" />
                   <span>Alterar listas</span>
                 </button>
               </div>
-              <p className="text-xs text-slate-300 pl-5">
+              <p className="text-xs text-zinc-300 pl-5">
                 {selectedSourceIds.length} lista(s) monitorada(s)
               </p>
             </div>
 
             {/* Filtered Assignee / User Summary */}
-            <div className="p-3 bg-slate-900/90 rounded-xl border border-white/5 space-y-2">
+            <div className="p-3 bg-zinc-950/80 rounded-xl border border-white/5 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-zinc-400" />
                   <span>Responsável Filtrado:</span>
                 </span>
                 <button
                   onClick={handleOpenAssigneesStep}
-                  className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
                 >
                   <SlidersHorizontal className="w-3 h-3" />
                   <span>Alterar responsável</span>
@@ -1028,15 +1083,15 @@ export const SettingsView: React.FC = () => {
                   ).map((userName) => (
                     <span
                       key={userName}
-                      className="text-[10px] font-semibold bg-blue-950/60 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md flex items-center gap-1"
+                      className="text-[10px] font-semibold bg-zinc-800 text-zinc-200 border border-white/10 px-2 py-0.5 rounded-md flex items-center gap-1"
                     >
                       <UserCheck className="w-3 h-3" />
                       <span>{userName}</span>
                     </span>
                   ))
                 ) : (
-                  <span className="text-xs font-medium text-slate-400 flex items-center gap-1">
-                    <Users className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-xs font-medium text-zinc-400 flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-zinc-500" />
                     <span>Qualquer responsável (Todas as tarefas)</span>
                   </span>
                 )}
@@ -1044,15 +1099,15 @@ export const SettingsView: React.FC = () => {
             </div>
 
             {/* Filtered Statuses Summary */}
-            <div className="p-3 bg-slate-900/90 rounded-xl border border-white/5 space-y-2">
+            <div className="p-3 bg-zinc-950/80 rounded-xl border border-white/5 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                  <Filter className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-zinc-400" />
                   <span>Status Filtrados:</span>
                 </span>
                 <button
                   onClick={handleProceedToStatuses}
-                  className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 cursor-pointer"
                 >
                   <SlidersHorizontal className="w-3 h-3" />
                   <span>Alterar status</span>
@@ -1062,7 +1117,7 @@ export const SettingsView: React.FC = () => {
                 {integration.selectedStatuses.map((st) => (
                   <span
                     key={st}
-                    className="text-[10px] font-semibold bg-blue-950/60 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md"
+                    className="text-[10px] font-semibold bg-zinc-800 text-zinc-200 border border-white/10 px-2 py-0.5 rounded-md"
                   >
                     {st}
                   </span>
@@ -1085,7 +1140,7 @@ export const SettingsView: React.FC = () => {
                 type="button"
                 onClick={() => SyncService.syncNow()}
                 disabled={isSyncing}
-                className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold py-1.5 px-3 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                className="text-xs bg-zinc-100 hover:bg-white text-zinc-950 font-bold py-1.5 px-3 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 <span>Sincronizar agora</span>
@@ -1108,10 +1163,323 @@ export const SettingsView: React.FC = () => {
         )}
       </div>
 
-      {/* App Preferences */}
-      <div className="p-3.5 bg-slate-950/60 border border-white/10 rounded-2xl space-y-3">
+      {/* ----------------- ATALHOS & AUTOMAÇÃO DE FINALIZAÇÃO (SEMANTIC: ORANGE) ----------------- */}
+      <div className="p-3.5 bg-zinc-900 border border-orange-500/30 rounded-2xl space-y-3.5 shadow-lg relative overflow-hidden">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">Preferências do DailyFlow</h3>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center text-zinc-950 font-bold text-xs shadow-md shadow-orange-500/20">
+              <Zap className="w-4 h-4 fill-zinc-950" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
+                <span>Atalho de Finalização Automática</span>
+                <span className="text-[9px] bg-orange-500/20 text-orange-300 font-bold px-1.5 py-0.2 rounded border border-orange-500/30">
+                  ClickUp ⚡
+                </span>
+              </h3>
+              <p className="text-[10px] text-zinc-400">
+                Mude o status e envie um comentário com @menção ao concluir uma tarefa
+              </p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={shortcutEnabled}
+              onChange={(e) => setShortcutEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
+          </label>
+        </div>
+
+        {shortcutEnabled && (
+          <div className="space-y-3 pt-1 border-t border-white/5 animate-in fade-in duration-200">
+            {/* 1. Status Alvo no ClickUp */}
+            <div>
+              <label className="text-[11px] font-medium text-zinc-300 flex items-center justify-between mb-1.5">
+                <span className="flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-orange-400" />
+                  <span>1. Status final no ClickUp:</span>
+                </span>
+                <span className="text-[10px] text-zinc-400">
+                  Selecionado: <strong className="text-orange-300 font-semibold">{shortcutTargetStatus}</strong>
+                </span>
+              </label>
+
+              {/* Status pills selector - apenas status reais do workspace */}
+              <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 rounded-xl border border-white/5">
+                {distinctStatuses.length > 0 ? (
+                  distinctStatuses.map((statusName) => {
+                    const isSelected = shortcutTargetStatus.toUpperCase() === statusName.toUpperCase();
+                    return (
+                      <button
+                        key={statusName}
+                        type="button"
+                        onClick={() => setShortcutTargetStatus(statusName)}
+                        className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-orange-500 text-zinc-950 border-orange-400 shadow-md shadow-orange-500/20 font-bold'
+                            : 'bg-zinc-900 text-zinc-400 border-white/10 hover:border-white/20 hover:text-zinc-200'
+                        }`}
+                      >
+                        {statusName}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="text-[11px] text-zinc-400 italic">
+                    Nenhum status encontrado no workspace. Conecte o ClickUp e selecione suas listas acima.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Responsável a ser Marcado */}
+            <div>
+              <label className="text-[11px] font-medium text-zinc-300 flex items-center justify-between mb-1.5">
+                <span className="flex items-center gap-1">
+                  <AtSign className="w-3 h-3 text-orange-400" />
+                  <span>2. Pessoa a ser marcada (@mention):</span>
+                </span>
+                <span className="text-[10px] text-zinc-400">
+                  {shortcutAssigneeId
+                    ? availableMembers.find((m) => m.id === shortcutAssigneeId)?.username || 'Usuário selecionado'
+                    : 'Ninguém (sem tag)'}
+                </span>
+              </label>
+
+              {availableMembers.length > 0 ? (
+                <div className="space-y-1.5">
+                  {/* Quick search input */}
+                  {availableMembers.length > 4 && (
+                    <div className="relative mb-1">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400" />
+                      <input
+                        type="text"
+                        value={shortcutMemberFilter}
+                        onChange={(e) => setShortcutMemberFilter(e.target.value)}
+                        placeholder="Filtrar membros do workspace..."
+                        className="w-full pl-7 pr-2.5 py-1 bg-zinc-950 border border-white/10 rounded-lg text-[11px] text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400"
+                      />
+                    </div>
+                  )}
+
+                  <div className="max-h-36 overflow-y-auto space-y-1 pr-1 bg-zinc-950 p-1.5 rounded-xl border border-white/5">
+                    {/* Option: No mention */}
+                    <div
+                      onClick={() => setShortcutAssigneeId('')}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all ${
+                        !shortcutAssigneeId
+                          ? 'bg-orange-500/20 border border-orange-500/40 text-orange-200 font-medium'
+                          : 'bg-zinc-950 border border-transparent hover:bg-zinc-900 text-zinc-400'
+                      }`}
+                    >
+                      <span className="text-[11px]">Nenhum membro específico (Apenas comentário)</span>
+                      {!shortcutAssigneeId && <Check className="w-3.5 h-3.5 text-orange-400" />}
+                    </div>
+
+                    {/* Member options */}
+                    {availableMembers
+                      .filter((m) =>
+                        shortcutMemberFilter
+                          ? m.username.toLowerCase().includes(shortcutMemberFilter.toLowerCase()) ||
+                            (m.email && m.email.toLowerCase().includes(shortcutMemberFilter.toLowerCase()))
+                          : true
+                      )
+                      .map((member) => {
+                        const isSelected = shortcutAssigneeId === member.id;
+                        return (
+                          <div
+                            key={member.id}
+                            onClick={() => setShortcutAssigneeId(member.id)}
+                            className={`flex items-center justify-between p-1.5 rounded-lg cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-orange-500/20 border border-orange-500/40 text-white'
+                                : 'bg-zinc-950 border border-transparent hover:bg-zinc-900 text-zinc-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {member.avatarUrl ? (
+                                <img
+                                  src={member.avatarUrl}
+                                  alt={member.username}
+                                  className="w-5 h-5 rounded-full object-cover border border-white/10"
+                                />
+                              ) : (
+                                <div
+                                  className="w-5 h-5 rounded-full text-[9px] font-bold text-zinc-950 bg-zinc-200 flex items-center justify-center border border-white/10"
+                                >
+                                  {member.username.substring(0, 1).toUpperCase()}
+                                </div>
+                              )}
+                              <div className="truncate">
+                                <span className="text-xs font-medium block truncate">{member.username}</span>
+                                {member.email && (
+                                  <span className="text-[9px] text-zinc-500 block truncate">{member.email}</span>
+                                )}
+                              </div>
+                            </div>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-zinc-950 rounded-xl border border-white/5 text-[11px] text-zinc-400">
+                  Nenhum membro carregado ainda. Conecte sua conta do ClickUp acima para carregar a lista de membros do workspace.
+                </div>
+              )}
+            </div>
+
+            {/* 3. Modelo do Comentário */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-medium text-zinc-300 flex items-center gap-1">
+                  <MessageSquare className="w-3 h-3 text-orange-400" />
+                  <span>3. Modelo do comentário:</span>
+                </label>
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-zinc-500">Tags:</span>
+                  <button
+                    type="button"
+                    onClick={() => setShortcutCommentTemplate((prev) => `${prev} @{member}`)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-orange-300 px-1.5 py-0.5 rounded text-[9px] border border-white/5 cursor-pointer"
+                    title="Inserir tag do membro selecionado"
+                  >
+                    + @{'{member}'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShortcutCommentTemplate((prev) => `${prev} {task}`)}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-1.5 py-0.5 rounded text-[9px] border border-white/5 cursor-pointer"
+                    title="Inserir título da tarefa"
+                  >
+                    + {'{task}'}
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                rows={2}
+                value={shortcutCommentTemplate}
+                onChange={(e) => setShortcutCommentTemplate(e.target.value)}
+                placeholder="Digite a mensagem padrão que será publicada como comentário..."
+                className="w-full p-2 bg-zinc-950 border border-white/10 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-orange-500/60 resize-none font-sans"
+              />
+
+              {/* Live Preview Box */}
+              <div className="mt-2 p-2.5 bg-zinc-950 rounded-xl border border-white/5 space-y-1">
+                <span className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wider block">
+                  Prévia do Comentário no ClickUp:
+                </span>
+                {(() => {
+                  const selectedMember = availableMembers.find((m) => m.id === shortcutAssigneeId);
+                  const memberName = selectedMember?.username;
+                  const effectiveMember = memberName || 'Membro';
+                  const effectiveTask = 'Implementar nova funcionalidade';
+                  const todayStr = new Date().toLocaleDateString('pt-BR');
+
+                  const template = shortcutCommentTemplate || 'Tarefa finalizada com sucesso! 🚀';
+                  const hasTag =
+                    template.includes('@{member}') ||
+                    template.includes('{member}') ||
+                    (memberName ? template.includes(`@${memberName}`) : false);
+                  const shouldPrefix = !!memberName && !hasTag;
+
+                  // Substituir {task} e {date}
+                  const processed = template.replace(/{task}/gi, effectiveTask).replace(/{date}/gi, todayStr);
+
+                  // Dividir por @{member} e {member} para renderizar na posição exata
+                  const parts = processed.split(/(@\{member\}|\{member\})/gi);
+
+                  return (
+                    <p className="text-[11px] text-zinc-200 break-words leading-relaxed">
+                      {shouldPrefix && (
+                        <span className="inline-block bg-orange-500/20 text-orange-300 font-semibold px-1.5 py-0.5 rounded mr-1 border border-orange-500/30">
+                          @{effectiveMember}
+                        </span>
+                      )}
+                      {parts.map((part, idx) => {
+                        if (part.toLowerCase() === '@{member}') {
+                          return (
+                            <span
+                              key={idx}
+                              className="inline-block bg-orange-500/20 text-orange-300 font-semibold px-1.5 py-0.5 rounded mx-0.5 border border-orange-500/30"
+                            >
+                              @{effectiveMember}
+                            </span>
+                          );
+                        }
+                        if (part.toLowerCase() === '{member}') {
+                          return (
+                            <span
+                              key={idx}
+                              className="inline-block bg-orange-500/20 text-orange-300 font-semibold px-1.5 py-0.5 rounded mx-0.5 border border-orange-500/30"
+                            >
+                              {effectiveMember}
+                            </span>
+                          );
+                        }
+                        return <span key={idx}>{part}</span>;
+                      })}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Save Button & Feedback */}
+            <div className="pt-2 flex items-center justify-between border-t border-white/5">
+              {shortcutSavedMessage ? (
+                <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium animate-in fade-in">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{shortcutSavedMessage}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-zinc-500">
+                  Ao clicar em ⚡ na tarefa, esta ação será executada instantaneamente.
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSavingShortcut(true);
+                  const selectedMember = availableMembers.find((m) => m.id === shortcutAssigneeId);
+                  const updated: CompletionShortcut = {
+                    id: completionShortcut?.id || 'default_shortcut',
+                    name: shortcutName.trim() || 'Finalizar e Notificar',
+                    targetStatus: shortcutTargetStatus.toUpperCase(),
+                    targetStatusColor: '#f97316',
+                    assigneeToMentionId: shortcutAssigneeId || undefined,
+                    assigneeToMentionName: selectedMember?.username || undefined,
+                    assigneeToMentionAvatar: selectedMember?.avatarUrl || undefined,
+                    commentTemplate: shortcutCommentTemplate.trim() || 'Tarefa finalizada com sucesso! 🚀',
+                    isEnabled: shortcutEnabled,
+                  };
+                  await setCompletionShortcut(updated);
+                  setIsSavingShortcut(false);
+                  setShortcutSavedMessage('Automação salva com sucesso!');
+                  setTimeout(() => setShortcutSavedMessage(null), 3000);
+                }}
+                disabled={isSavingShortcut}
+                className="bg-orange-500 hover:bg-orange-400 text-zinc-950 font-bold text-xs py-1.5 px-3.5 rounded-xl transition-all shadow-md shadow-orange-500/20 flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                <Zap className="w-3.5 h-3.5 fill-zinc-950" />
+                <span>{isSavingShortcut ? 'Salvando...' : 'Salvar Automação ⚡'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* App Preferences */}
+      <div className="p-3.5 bg-zinc-900 border border-white/10 rounded-2xl space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-zinc-200">Preferências do DailyFlow</h3>
           {prefsSavedMessage && (
             <span className="text-[10px] text-emerald-400 flex items-center gap-1">
               <Check className="w-3 h-3" />
@@ -1120,29 +1488,29 @@ export const SettingsView: React.FC = () => {
           )}
         </div>
         
-        <div className="space-y-2.5 text-xs text-slate-300">
-          <label className="flex items-center justify-between cursor-pointer p-1.5 rounded-lg hover:bg-slate-900/60 transition-colors">
+        <div className="space-y-2.5 text-xs text-zinc-300">
+          <label className="flex items-center justify-between cursor-pointer p-1.5 rounded-lg hover:bg-zinc-950/60 transition-colors">
             <div>
               <span className="block font-medium">Iniciar com o sistema operacional</span>
-              <span className="text-[10px] text-slate-500 block">Abrir a aba lateral automaticamente no boot</span>
+              <span className="text-[10px] text-zinc-500 block">Abrir a aba lateral automaticamente no boot</span>
             </div>
             <input
               type="checkbox"
               checked={autostart}
               onChange={(e) => setAutostart(e.target.checked)}
-              className="rounded bg-slate-950 border-white/20 text-blue-600 cursor-pointer"
+              className="rounded bg-zinc-950 border-white/20 text-zinc-200 cursor-pointer accent-zinc-200"
             />
           </label>
-          <label className="flex items-center justify-between cursor-pointer p-1.5 rounded-lg hover:bg-slate-900/60 transition-colors">
+          <label className="flex items-center justify-between cursor-pointer p-1.5 rounded-lg hover:bg-zinc-950/60 transition-colors">
             <div>
               <span className="block font-medium">Atalho global de teclado (Cmd+Shift+D)</span>
-              <span className="text-[10px] text-slate-500 block">Atalho do sistema para abrir/fechar a aba</span>
+              <span className="text-[10px] text-zinc-500 block">Atalho do sistema para abrir/fechar a aba</span>
             </div>
             <input
               type="checkbox"
               checked={globalShortcut}
               onChange={(e) => setGlobalShortcut(e.target.checked)}
-              className="rounded bg-slate-950 border-white/20 text-blue-600 cursor-pointer"
+              className="rounded bg-zinc-950 border-white/20 text-zinc-200 cursor-pointer accent-zinc-200"
             />
           </label>
         </div>
@@ -1158,7 +1526,7 @@ export const SettingsView: React.FC = () => {
               setTimeout(() => setPrefsSavedMessage(null), 3000);
             }}
             disabled={isSavingPrefs}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+            className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             <span>{isSavingPrefs ? 'Salvando...' : 'Salvar preferências'}</span>
@@ -1168,3 +1536,4 @@ export const SettingsView: React.FC = () => {
     </div>
   );
 };
+
