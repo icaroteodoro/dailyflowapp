@@ -1,5 +1,32 @@
 use keyring::Entry;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+static EXPANDED: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn apply_preferences(app: AppHandle, autostart: bool, global_shortcut: bool) -> Result<(), String> {
+    if autostart {
+        app.autolaunch().enable()
+    } else {
+        app.autolaunch().disable()
+    }
+    .map_err(|e| e.to_string())?;
+    let shortcut = "CommandOrControl+Shift+D";
+    if global_shortcut {
+        if !app.global_shortcut().is_registered(shortcut) {
+            app.global_shortcut()
+                .register(shortcut)
+                .map_err(|e| e.to_string())?;
+        }
+    } else {
+        app.global_shortcut()
+            .unregister(shortcut)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[tauri::command]
@@ -34,6 +61,9 @@ fn set_drawer_state(app: AppHandle, expanded: bool) -> Result<(), String> {
         if let Ok(Some(monitor)) = window.current_monitor() {
             let screen_size = monitor.size();
             let scale_factor = monitor.scale_factor();
+            let origin = monitor.position();
+            let origin_x = origin.x as f64 / scale_factor;
+            let origin_y = origin.y as f64 / scale_factor;
             let screen_w = screen_size.width as f64 / scale_factor;
             let screen_h = screen_size.height as f64 / scale_factor;
 
@@ -43,28 +73,36 @@ fn set_drawer_state(app: AppHandle, expanded: bool) -> Result<(), String> {
             if expanded {
                 let drawer_w = 420.0_f64;
                 let x_pos = screen_w - drawer_w;
-                let _ = window.set_size(LogicalSize::new(drawer_w, drawer_h));
-                let _ = window.set_position(LogicalPosition::new(x_pos, y_pos));
+                window
+                    .set_size(LogicalSize::new(drawer_w, drawer_h))
+                    .map_err(|e| e.to_string())?;
+                let _ =
+                    window.set_position(LogicalPosition::new(origin_x + x_pos, origin_y + y_pos));
             } else {
                 let handle_w = 44.0_f64;
                 let handle_h = 120.0_f64;
                 let x_pos = screen_w - handle_w;
                 let handle_y = ((screen_h - handle_h) / 2.0).max(20.0);
-                let _ = window.set_size(LogicalSize::new(handle_w, handle_h));
-                let _ = window.set_position(LogicalPosition::new(x_pos, handle_y));
+                window
+                    .set_size(LogicalSize::new(handle_w, handle_h))
+                    .map_err(|e| e.to_string())?;
+                let _ = window
+                    .set_position(LogicalPosition::new(origin_x + x_pos, origin_y + handle_y));
             }
         }
     }
+    EXPANDED.store(expanded, Ordering::SeqCst);
+    app.emit("drawer-state", expanded)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let migrations = vec![
-        Migration {
-            version: 1,
-            description: "create_initial_tables",
-            sql: "
+    let migrations = vec![Migration {
+        version: 1,
+        description: "create_initial_tables",
+        sql: "
                 CREATE TABLE IF NOT EXISTS integrations (
                     id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
@@ -112,12 +150,34 @@ pub fn run() {
                     value TEXT NOT NULL
                 );
             ",
-            kind: MigrationKind::Up,
-        },
-    ];
+        kind: MigrationKind::Up,
+    }];
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        let expanded = !EXPANDED.load(Ordering::SeqCst);
+                        let _ = set_drawer_state(app.clone(), expanded);
+                        if expanded {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(false))
+                && EXPANDED.load(Ordering::SeqCst)
+            {
+                let _ = set_drawer_state(window.app_handle().clone(), false);
+            }
+        })
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:dailyflow.db", migrations)
@@ -148,14 +208,15 @@ pub fn run() {
                 }
             }
 
-            let _ = set_drawer_state(handle, true);
+            let _ = set_drawer_state(handle, false);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             save_secure_token,
             get_secure_token,
             delete_secure_token,
-            set_drawer_state
+            set_drawer_state,
+            apply_preferences
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -14,6 +14,7 @@ export class ClickUpProvider implements ITaskProvider {
 
     const response = await fetch(url, {
       ...options,
+      signal: options.signal ?? AbortSignal.timeout(30000),
       headers: {
         Authorization: cleanToken,
         'Content-Type': 'application/json',
@@ -26,7 +27,7 @@ export class ClickUpProvider implements ITaskProvider {
       throw new Error(`ClickUp API Error (${response.status}): ${errorText}`);
     }
 
-    return response.json();
+    return response.status === 204 ? undefined as T : response.json();
   }
 
   async validateToken(token: string): Promise<{ isValid: boolean; username?: string; error?: string }> {
@@ -59,8 +60,8 @@ export class ClickUpProvider implements ITaskProvider {
         color: data.user.color,
         avatarUrl: data.user.profilePicture,
       };
-    } catch {
-      return null;
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -120,7 +121,7 @@ export class ClickUpProvider implements ITaskProvider {
       return members;
     } catch (e) {
       console.warn('Error fetching ClickUp workspace members:', e);
-      return [];
+      throw e;
     }
   }
 
@@ -128,8 +129,8 @@ export class ClickUpProvider implements ITaskProvider {
     try {
       const data = await this.request<{ teams: Array<{ id: string; name: string }> }>('/team', token);
       return (data.teams || []).map((t) => ({ id: String(t.id), name: t.name }));
-    } catch {
-      return [];
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -161,7 +162,7 @@ export class ClickUpProvider implements ITaskProvider {
                   id: s.status.toLowerCase(),
                   name: s.status.toUpperCase(),
                   color: s.color,
-                  isDone: ['done', 'closed', 'complete'].includes(s.status.toLowerCase()),
+                  isDone: s.type === 'closed' || s.type === 'done',
                 }));
 
                 const [folderlessListsRes, foldersRes] = await Promise.all([
@@ -171,7 +172,7 @@ export class ClickUpProvider implements ITaskProvider {
                       name: string;
                       statuses?: Array<{ status: string; color: string; type?: string }>;
                     }>;
-                  }>(`/space/${space.id}/list?archived=false`, token).catch(() => ({ lists: [] })),
+                  }>(`/space/${space.id}/list?archived=false`, token),
                   this.request<{
                     folders: Array<{
                       id: string;
@@ -182,7 +183,7 @@ export class ClickUpProvider implements ITaskProvider {
                         statuses?: Array<{ status: string; color: string; type?: string }>;
                       }>;
                     }>;
-                  }>(`/space/${space.id}/folder?archived=false`, token).catch(() => ({ folders: [] })),
+                  }>(`/space/${space.id}/folder?archived=false`, token),
                 ]);
 
                 // 1. Folderless lists
@@ -193,7 +194,7 @@ export class ClickUpProvider implements ITaskProvider {
                           id: s.status.toLowerCase(),
                           name: s.status.toUpperCase(),
                           color: s.color,
-                          isDone: ['done', 'closed', 'complete'].includes(s.status.toLowerCase()),
+                          isDone: s.type === 'closed' || s.type === 'done',
                         }))
                       : spaceStatuses;
 
@@ -217,7 +218,7 @@ export class ClickUpProvider implements ITaskProvider {
                             id: s.status.toLowerCase(),
                             name: s.status.toUpperCase(),
                             color: s.color,
-                            isDone: ['done', 'closed', 'complete'].includes(s.status.toLowerCase()),
+                            isDone: s.type === 'closed' || s.type === 'done',
                           }))
                         : spaceStatuses;
 
@@ -236,8 +237,8 @@ export class ClickUpProvider implements ITaskProvider {
                 });
               })
             );
-          } catch {
-            // ignore team error
+          } catch (error) {
+            throw error;
           }
         })
       );
@@ -245,7 +246,7 @@ export class ClickUpProvider implements ITaskProvider {
       return sources;
     } catch (error) {
       console.warn('Error fetching ClickUp sources:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -282,7 +283,9 @@ export class ClickUpProvider implements ITaskProvider {
           });
         }
 
-        const url = `/list/${source.id}/task?${queryParams.join('&')}`;
+        const listTasks: ExternalTask[] = [];
+        for (let page = 0; ; page++) {
+        const url = `/list/${source.id}/task?${queryParams.join('&')}&page=${page}`;
         const data = await this.request<{
           tasks: Array<{
             id: string;
@@ -303,11 +306,9 @@ export class ClickUpProvider implements ITaskProvider {
           }>;
         }>(url, token);
 
-        const listTasks: ExternalTask[] = [];
-
         for (const t of data.tasks || []) {
           const statusName = (t.status?.status || 'TO DO').toUpperCase();
-          const isDone = ['done', 'complete', 'closed'].includes(statusName.toLowerCase());
+          const isDone = t.status.type === 'closed' || t.status.type === 'done';
 
           if (options?.hideDoneTasks && isDone) continue;
 
@@ -380,10 +381,12 @@ export class ClickUpProvider implements ITaskProvider {
           });
         }
 
+        if ((data.tasks || []).length < 100) break;
+        }
         return listTasks;
       } catch (e) {
         console.warn(`Error fetching tasks for list ${source.id}:`, e);
-        return [];
+        throw e;
       }
     };
 
@@ -397,7 +400,7 @@ export class ClickUpProvider implements ITaskProvider {
       results.forEach((listTasks) => allTasks.push(...listTasks));
     }
 
-    return allTasks;
+    return [...new Map(allTasks.map(task => [task.id, task])).values()];
   }
 
   async updateTaskStatus(token: string, taskId: string, statusName: string): Promise<void> {
@@ -474,8 +477,10 @@ export class ClickUpProvider implements ITaskProvider {
     };
     if (data.description) payload.description = data.description;
     if (data.dueDate) {
-      const ms = Date.parse(data.dueDate);
-      if (!isNaN(ms)) payload.due_date = ms;
+      const ms = new Date(`${data.dueDate}T12:00:00`).getTime();
+      if (isNaN(ms)) throw new Error('Prazo inválido.');
+      payload.due_date = ms;
+      payload.due_date_time = false;
     }
 
     const res = await this.request<{
@@ -504,11 +509,7 @@ export class ClickUpProvider implements ITaskProvider {
         color: res.status?.color || '#87909e',
         isDone: false,
       },
-      availableStatuses: [
-        { id: 'to_do', name: 'TO DO', color: '#87909e' },
-        { id: 'in_progress', name: 'IN PROGRESS', color: '#3b82f6' },
-        { id: 'done', name: 'DONE', color: '#10b981', isDone: true },
-      ],
+      availableStatuses: [],
       sourceId: String(data.listId),
       sourceName: res.list?.name || 'Lista',
       spaceName: res.space?.name,

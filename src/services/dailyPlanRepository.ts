@@ -3,6 +3,13 @@ import { DailyPlanItem, ExternalTask } from '../types';
 import { TaskRepository } from './taskRepository';
 
 export const DailyPlanRepository = {
+  async reorder(date: string, taskIds: string[]): Promise<void> {
+    if (!taskIds.length) return;
+    const db = await getDatabase();
+    const cases = taskIds.map((_, index) => `WHEN $${index + 2} THEN ${index}`).join(' ');
+    await db.execute(`UPDATE daily_plan_items SET sort_order = CASE task_id ${cases} ELSE sort_order END WHERE plan_id = $1`,
+      [`plan_${date}`, ...taskIds]);
+  },
   /**
    * Obtém o planejamento do dia especificado (formato 'YYYY-MM-DD')
    */
@@ -50,7 +57,7 @@ export const DailyPlanRepository = {
       return planItems;
     } catch (error) {
       console.warn('Error loading daily plan from SQLite:', error);
-      return [];
+      throw error;
     }
   },
 
@@ -66,6 +73,10 @@ export const DailyPlanRepository = {
         [planId, date]
       );
 
+      await TaskRepository.upsertTasks(tasks);
+      const rows = await db.select<Array<{next_order: number}>>(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM daily_plan_items WHERE plan_id = $1', [planId]);
+      const nextOrder = rows[0].next_order;
       for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
         const itemId = `item_${date}_${task.id}`;
@@ -73,11 +84,12 @@ export const DailyPlanRepository = {
           `INSERT OR IGNORE INTO daily_plan_items (
             id, plan_id, task_id, sort_order, completed_locally
           ) VALUES ($1, $2, $3, $4, 0)`,
-          [itemId, planId, task.id, i]
+          [itemId, planId, task.id, nextOrder + i]
         );
       }
     } catch (error) {
       console.warn('Error adding items to daily plan in SQLite:', error);
+      throw error;
     }
   },
 
@@ -94,6 +106,7 @@ export const DailyPlanRepository = {
       );
     } catch (error) {
       console.warn('Error toggling local completion in SQLite:', error);
+      throw error;
     }
   },
 
@@ -110,6 +123,7 @@ export const DailyPlanRepository = {
       );
     } catch (error) {
       console.warn('Error removing item from daily plan in SQLite:', error);
+      throw error;
     }
   },
 };

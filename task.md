@@ -15,7 +15,7 @@ Acompanhamento do desenvolvimento do aplicativo desktop de produtividade diária
 - [x] **Etapa 7: Detalhes da Tarefa & Mudança de Status**
 - [x] **Etapa 8: Comentários Rápidos**
 - [x] **Etapa 9: Criação Rápida de Tarefas**
-- [x] **Etapa 10: Tratamento Offline, UX, Erros & Validação**
+- [ ] **Etapa 10: Tratamento Offline, UX, Erros & Validação** — testes automatizados disponíveis; validação manual multiplataforma pendente.
 
 ---
 
@@ -35,7 +35,8 @@ Acompanhamento do desenvolvimento do aplicativo desktop de produtividade diária
   - [x] Mecanismo de clique na aba para expandir o painel.
   - [x] Mecanismo para recolher o painel ao clicar fora ou na aba.
   - [x] Suporte a atalhos de teclado para abrir/fechar.
-- [x] Configurar design system base (Dark/Light mode, tipografia, micro-animações suaves).
+- [x] Configurar tema escuro, tipografia e micro-animações.
+- [ ] Implementar tema claro e alternância de tema.
 - [x] Estruturar navegação interna (Meu Dia, Todas as Tarefas, Configurações).
 
 ---
@@ -106,7 +107,7 @@ Acompanhamento do desenvolvimento do aplicativo desktop de produtividade diária
 
 ## 🔍 Etapa 7: Detalhes da Tarefa & Ações Rápidas
 - [x] Criar painel/drawer de detalhes da tarefa selecionada:
-  - [x] Exibir título, descrição formatada, status atual, datas e lista de origem.
+  - [x] Exibir título, descrição em texto com quebras de linha, status atual, datas e lista de origem.
 - [x] Implementar seletor para **Alterar Status**:
   - [x] Listar status disponíveis vindos do ClickUp.
   - [x] Atualizar imediatamente no ClickUp e sincronizar com o cache local.
@@ -143,5 +144,6 @@ Acompanhamento do desenvolvimento do aplicativo desktop de produtividade diária
   - [x] Nenhuma tarefa encontrada / Meu Dia vazio.
   - [x] Falha ao atualizar status ou enviar comentário com retry/alerta não bloqueante.
 - [x] Ajustar performance e fluidez da animação de expandir/recolher da aba lateral.
-- [x] Testes manuais e unitários dos fluxos críticos (Providers, Cache, Daily Plan).
-- [x] Validação de build final para distribuição desktop.
+- [x] Testes automatizados de regressão para Providers, Cache, Daily Plan e credenciais.
+- [ ] Validar manualmente ClickUp real, Keychain/cofre Windows, atalho global e inicialização automática nos dois sistemas.
+- [ ] Validar instaladores finais de macOS Intel/Apple Silicon e Windows antes da próxima release.

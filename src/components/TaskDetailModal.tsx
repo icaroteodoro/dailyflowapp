@@ -26,8 +26,11 @@ export const TaskDetailModal: React.FC = () => {
     removeFromMyDay,
     completionShortcut,
     executeCompletionShortcut,
+    showToast,
+    busyTaskIds,
   } = useAppStore();
 
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [comments, setComments] = useState<
     Array<{ id: string; text: string; author: string; time: string }>
@@ -51,33 +54,39 @@ export const TaskDetailModal: React.FC = () => {
   };
 
   const handleStatusChange = async (newStatus: string) => {
-    updateTaskStatus(task.id, newStatus);
+    if (isUpdatingStatus) return;
+    setIsUpdatingStatus(true);
     try {
       const token = await KeychainService.getToken(`${task.provider}_api_token`);
+      if (!token) throw new Error('Reconecte sua conta nas configurações.');
       if (token) {
         const provider = ProviderFactory.getProvider(task.provider);
         await provider.updateTaskStatus(token, task.externalId, newStatus);
+        await updateTaskStatus(task.id, newStatus);
       }
     } catch (e) {
-      console.warn('Could not sync status remotely, updated locally:', e);
-    }
+      showToast({type: 'error', title: 'Alteração de status não confirmada. Sincronize para conferir.', message: String(e)});
+    } finally { setIsUpdatingStatus(false); }
   };
 
   const handleSendComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentText.trim()) return;
+    if (!commentText.trim() || isSendingComment) return;
 
     setIsSendingComment(true);
     const textToSend = commentText.trim();
 
     try {
       const token = await KeychainService.getToken(`${task.provider}_api_token`);
+      if (!token) throw new Error('Reconecte sua conta nas configurações.');
       if (token) {
         const provider = ProviderFactory.getProvider(task.provider);
         await provider.createComment(token, task.externalId, textToSend);
       }
     } catch (e) {
-      console.warn('Could not send comment to remote API, recorded in session:', e);
+      showToast({type: 'error', title: 'Envio não confirmado. Confira o ClickUp antes de reenviar.', message: String(e)});
+      setIsSendingComment(false);
+      return;
     }
 
     setComments((prev) => [
@@ -141,6 +150,7 @@ export const TaskDetailModal: React.FC = () => {
             <div className="flex items-center gap-2">
               <label className="text-[11px] text-zinc-400 font-medium">Status:</label>
               <select
+                disabled={isUpdatingStatus || busyTaskIds.has(task.id)}
                 value={task.status.name}
                 onChange={(e) => handleStatusChange(e.target.value)}
                 className="bg-zinc-950/90 border border-white/10 text-xs font-semibold rounded-lg px-2.5 py-1 focus:outline-none focus:border-zinc-400 cursor-pointer"
@@ -156,8 +166,9 @@ export const TaskDetailModal: React.FC = () => {
 
             <div className="flex items-center gap-2 flex-wrap">
               {/* Quick Complete with Automation Button (Semantic: Orange) */}
-              {(!completionShortcut || completionShortcut.isEnabled) && (
+              {completionShortcut?.isEnabled && (
                 <button
+                  disabled={isUpdatingStatus || busyTaskIds.has(task.id)}
                   onClick={async () => {
                     await executeCompletionShortcut(task.id);
                   }}

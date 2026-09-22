@@ -5,6 +5,7 @@ import { TaskSource } from '../providers/TaskProvider';
 import { TaskRepository } from '../services/taskRepository';
 import { DailyPlanRepository } from '../services/dailyPlanRepository';
 import { SettingsRepository } from '../services/settingsRepository';
+import { localDateKey } from '../utils/date';
 import { CompletionService } from '../services/completionService';
 
 interface AppState {
@@ -32,6 +33,9 @@ interface AppState {
 
   // Initializer
   loadLocalData: () => Promise<void>;
+  refreshDay: () => Promise<void>;
+  planDate: string;
+  busyTaskIds: Set<string>;
 
   // Actions
   setIsExpanded: (expanded: boolean) => Promise<void>;
@@ -49,13 +53,12 @@ interface AppState {
   clearSelectedTaskIds: () => void;
   
   // Daily Plan Actions
-  addToMyDay: (taskIds: string[]) => void;
-  removeFromMyDay: (taskId: string) => void;
-  toggleCompleteLocally: (taskId: string) => void;
-  reorderMyDay: (sourceIndex: number, destIndex: number) => void;
-  
-  // Task Updates
-  updateTaskStatus: (taskId: string, newStatusName: string) => void;
+  addToMyDay: (taskIds: string[]) => Promise<void>;
+  removeFromMyDay: (taskId: string) => Promise<void>;
+  toggleCompleteLocally: (taskId: string) => Promise<void>;
+  reorderMyDay: (sourceIndex: number, destIndex: number) => Promise<void>;
+
+  updateTaskStatus: (taskId: string, newStatusName: string) => Promise<void>;
   
   // Completion Shortcut Automation
   setCompletionShortcut: (shortcut: CompletionShortcut) => Promise<void>;
@@ -68,8 +71,15 @@ interface AppState {
   setAvailableSources: (sources: TaskSource[]) => void;
 }
 
+let dailyWrite: Promise<unknown> = Promise.resolve();
+function serializeDailyWrite(action: () => Promise<void>): Promise<void> {
+  const next = dailyWrite.then(action);
+  dailyWrite = next.catch(() => undefined);
+  return next;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
-  isExpanded: true,
+  isExpanded: false,
   activeTab: 'my-day',
   searchQuery: '',
   selectedTaskForDetail: null,
@@ -83,26 +93,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   integration: null,
   availableSources: [],
   completionShortcut: null,
+  planDate: localDateKey(),
+  busyTaskIds: new Set<string>(),
   tasks: [],
   dailyPlanItems: [],
   selectedTaskIdsForMyDay: new Set<string>(),
 
   loadLocalData: async () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateKey();
     try {
       const [cachedTasks, dailyPlan, integration, shortcut] = await Promise.all([
-        TaskRepository.getAllTasks(),
+        TaskRepository.getVisibleTasks(),
         DailyPlanRepository.getDailyPlan(today),
         SettingsRepository.getIntegration(),
         SettingsRepository.getCompletionShortcut(),
       ]);
 
-      if (cachedTasks.length > 0) {
-        set({ tasks: cachedTasks });
-      }
-      if (dailyPlan.length > 0) {
-        set({ dailyPlanItems: dailyPlan });
-      }
+      set({ tasks: integration ? cachedTasks : [], dailyPlanItems: integration ? dailyPlan : [], planDate: today });
       if (integration) {
         set({ integration, lastSyncTime: integration.lastSyncAt });
       }
@@ -120,8 +127,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
     } catch (e) {
-      console.warn('Error loading initial local data:', e);
+      get().showToast({type: 'error', title: 'Não foi possível carregar os dados locais', message: String(e)});
     }
+  },
+
+  refreshDay: async () => {
+    const today = localDateKey();
+    if (today === get().planDate) return;
+    const dailyPlanItems = get().integration ? await DailyPlanRepository.getDailyPlan(today) : [];
+    set({ dailyPlanItems, planDate: today });
   },
 
   setIsExpanded: async (expanded) => {
@@ -158,63 +172,46 @@ export const useAppStore = create<AppState>((set, get) => ({
   hideToast: () => set({ toast: null }),
 
   setCompletionShortcut: async (shortcut) => {
-    set({ completionShortcut: shortcut });
     await SettingsRepository.saveCompletionShortcut(shortcut);
+    set({ completionShortcut: shortcut });
   },
 
   executeCompletionShortcut: async (taskId) => {
-    const state = get();
-    const task = state.tasks.find((t) => t.id === taskId) ||
-      state.dailyPlanItems.find((i) => i.task.id === taskId)?.task;
-
-    if (!task) return false;
-
-    // Load or fallback to default shortcut if none set
-    let shortcut = state.completionShortcut;
-    if (!shortcut) {
-      shortcut = await SettingsRepository.getCompletionShortcut();
-      if (shortcut) set({ completionShortcut: shortcut });
+    if (get().busyTaskIds.has(taskId)) return false;
+    set({ busyTaskIds: new Set([...get().busyTaskIds, taskId]) });
+    try {
+      const task = get().tasks.find(t => t.id === taskId) || get().dailyPlanItems.find(i => i.task.id === taskId)?.task;
+      const shortcut = get().completionShortcut;
+      if (!task || !shortcut?.isEnabled) return false;
+      const result = await CompletionService.executeShortcut(task, shortcut);
+      if (result.updatedStatus !== task.status.name) await get().updateTaskStatus(taskId, result.updatedStatus);
+      if (result.success && get().dailyPlanItems.some(i => i.task.id === taskId && !i.completedLocally)) {
+        await get().toggleCompleteLocally(taskId);
+        if (get().dailyPlanItems.some(i => i.task.id === taskId && !i.completedLocally)) {
+          throw new Error('ClickUp atualizado, mas não foi possível salvar a conclusão no Meu Dia.');
+        }
+      }
+      get().showToast({ type: result.success ? 'success' : 'warning', title: result.success ? 'Automação concluída' : 'Automação incompleta', message: result.message });
+      return result.success;
+    } catch (error) {
+      get().showToast({type: 'error', title: 'Falha ao salvar o resultado', message: String(error)});
+      return false;
+    } finally {
+      const busyTaskIds = new Set(get().busyTaskIds);
+      busyTaskIds.delete(taskId);
+      set({busyTaskIds});
     }
-
-    if (!shortcut) {
-      shortcut = {
-        id: 'default',
-        name: 'Finalizar Tarefa',
-        targetStatus: 'COMPLETE',
-        commentTemplate: 'Tarefa finalizada com sucesso! 🚀',
-        isEnabled: true,
-      };
-    }
-
-    const targetStatus = shortcut.targetStatus || 'COMPLETE';
-
-    // 1. Optimistic Update no Store: atualizar status e marcar como concluído no Meu Dia
-    state.updateTaskStatus(taskId, targetStatus);
-    
-    // Se estiver no Meu Dia, marca como completado localmente também
-    const itemInMyDay = state.dailyPlanItems.find((i) => i.task.id === taskId);
-    if (itemInMyDay && !itemInMyDay.completedLocally) {
-      state.toggleCompleteLocally(taskId);
-    }
-
-    // 2. Executa a orquestração remota e comentários via CompletionService
-    const result = await CompletionService.executeShortcut(task, shortcut);
-
-    // 3. Exibir Toast de feedback
-    state.showToast({
-      type: result.success ? 'success' : 'warning',
-      title: '⚡ Automação Executada',
-      message: result.message,
-    });
-
-    return result.success;
   },
-  
+
   setTasks: (tasks) => {
-    set({ tasks });
-    TaskRepository.upsertTasks(tasks);
+    const byId = new Map(tasks.map(task => [task.id, task]));
+    set(state => ({ tasks,
+      dailyPlanItems: state.dailyPlanItems.map(item => ({...item, task: byId.get(item.task.id) || item.task})),
+      selectedTaskForDetail: state.selectedTaskForDetail ? byId.get(state.selectedTaskForDetail.id) || state.selectedTaskForDetail : null,
+      selectedTaskIdsForMyDay: new Set([...state.selectedTaskIdsForMyDay].filter(id => byId.has(id))),
+    }));
   },
-  
+
   toggleSelectTaskForMyDay: (taskId) =>
     set((state) => {
       const next = new Set(state.selectedTaskIdsForMyDay);
@@ -228,54 +225,57 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearSelectedTaskIds: () => set({ selectedTaskIdsForMyDay: new Set<string>() }),
 
-  addToMyDay: (taskIds) => {
+  addToMyDay: (taskIds) => serializeDailyWrite(async () => {
+    try {
+    await get().refreshDay();
     const state = get();
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateKey();
     const existingTaskIds = new Set(state.dailyPlanItems.map((item) => item.task.id));
     
-    const newItems: DailyPlanItem[] = [];
     const tasksToAdd: ExternalTask[] = [];
 
     taskIds.forEach((id) => {
       if (!existingTaskIds.has(id)) {
         const task = state.tasks.find((t) => t.id === id);
         if (task) {
+          existingTaskIds.add(id);
           tasksToAdd.push(task);
-          newItems.push({
-            id: `myday_${Date.now()}_${id}`,
-            planDate: today,
-            task,
-            sortOrder: state.dailyPlanItems.length + newItems.length,
-            completedLocally: false,
-          });
+
         }
       }
     });
 
     if (tasksToAdd.length > 0) {
-      DailyPlanRepository.addItemsToPlan(today, tasksToAdd);
+      await DailyPlanRepository.addItemsToPlan(today, tasksToAdd);
     }
 
     set({
-      dailyPlanItems: [...state.dailyPlanItems, ...newItems],
+      dailyPlanItems: await DailyPlanRepository.getDailyPlan(today),
       selectedTaskIdsForMyDay: new Set<string>(),
       activeTab: 'my-day',
     });
-  },
+    } catch (error) { get().showToast({type: 'error', title: 'Não foi possível salvar o Meu Dia', message: String(error)}); }
+  }),
 
-  removeFromMyDay: (taskId) => {
-    const today = new Date().toISOString().split('T')[0];
-    DailyPlanRepository.removeItemFromPlan(today, taskId);
+  removeFromMyDay: (taskId) => serializeDailyWrite(async () => {
+    try {
+    await get().refreshDay();
+    const today = localDateKey();
+    await DailyPlanRepository.removeItemFromPlan(today, taskId);
     set((state) => ({
       dailyPlanItems: state.dailyPlanItems.filter((item) => item.task.id !== taskId),
     }));
-  },
+    } catch (error) { get().showToast({type: 'error', title: 'Não foi possível salvar o Meu Dia', message: String(error)}); }
+  }),
 
-  toggleCompleteLocally: (taskId) => {
-    const today = new Date().toISOString().split('T')[0];
+  toggleCompleteLocally: (taskId) => serializeDailyWrite(async () => {
+    try {
+    await get().refreshDay();
+    const today = localDateKey();
     const currentItem = get().dailyPlanItems.find((i) => i.task.id === taskId);
-    const nextCompleted = currentItem ? !currentItem.completedLocally : true;
-    DailyPlanRepository.toggleCompleteLocally(today, taskId, nextCompleted);
+    if (!currentItem) return;
+    const nextCompleted = !currentItem.completedLocally;
+    await DailyPlanRepository.toggleCompleteLocally(today, taskId, nextCompleted);
 
     set((state) => ({
       dailyPlanItems: state.dailyPlanItems.map((item) => {
@@ -289,20 +289,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         return item;
       }),
     }));
-  },
+    } catch (error) { get().showToast({type: 'error', title: 'Não foi possível salvar o Meu Dia', message: String(error)}); }
+  }),
 
-  reorderMyDay: (sourceIndex, destIndex) =>
-    set((state) => {
-      const items = [...state.dailyPlanItems];
+  reorderMyDay: (sourceIndex, destIndex) => serializeDailyWrite(async () => {
+    try {
+      await get().refreshDay();
+      const items = [...get().dailyPlanItems];
+      if (sourceIndex < 0 || destIndex < 0 || sourceIndex >= items.length || destIndex >= items.length) return;
       const [removed] = items.splice(sourceIndex, 1);
       items.splice(destIndex, 0, removed);
-      return {
-        dailyPlanItems: items.map((item, idx) => ({ ...item, sortOrder: idx })),
-      };
-    }),
+      await DailyPlanRepository.reorder(get().planDate, items.map(i => i.task.id));
+      set({dailyPlanItems: items.map((item, sortOrder) => ({...item, sortOrder}))});
+    } catch (error) { get().showToast({type: 'error', title: 'Não foi possível salvar a ordem', message: String(error)}); }
+  }),
 
-  updateTaskStatus: (taskId, newStatusName) => {
-    TaskRepository.updateStatus(taskId, newStatusName);
+  updateTaskStatus: async (taskId, newStatusName) => {
+    await TaskRepository.updateStatus(taskId, newStatusName);
     set((state) => {
       const updateList = (tasks: ExternalTask[]) =>
         tasks.map((t) => {

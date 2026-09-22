@@ -8,6 +8,8 @@ import {
   PlusCircle,
   Layers,
   Zap,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
@@ -20,6 +22,8 @@ export const MyDayView: React.FC = () => {
     setActiveTab,
     completionShortcut,
     executeCompletionShortcut,
+    reorderMyDay,
+    busyTaskIds,
   } = useAppStore();
 
   const total = dailyPlanItems.length;
@@ -67,7 +71,7 @@ export const MyDayView: React.FC = () => {
 
       {/* Task List */}
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-        {dailyPlanItems.map((item) => {
+        {dailyPlanItems.map((item, index) => {
           const { task, completedLocally } = item;
           return (
             <div
@@ -164,11 +168,16 @@ export const MyDayView: React.FC = () => {
               </div>
 
               {/* Actions */}
+              <div className="flex flex-col gap-1">
+                <button title="Mover para cima" disabled={index === 0} onClick={() => reorderMyDay(index, index - 1)} className="disabled:opacity-20"><ArrowUp className="w-3 h-3" /></button>
+                <button title="Mover para baixo" disabled={index === dailyPlanItems.length - 1} onClick={() => reorderMyDay(index, index + 1)} className="disabled:opacity-20"><ArrowDown className="w-3 h-3" /></button>
+              </div>
               <div className="flex items-center gap-1">
                 {/* ⚡ Quick Completion Shortcut Button (Semantic: Orange) */}
                 {completionShortcut && completionShortcut.isEnabled && (
                   <button
                     type="button"
+                    disabled={busyTaskIds.has(task.id)}
                     title={`Finalizar no ClickUp: ${completionShortcut.name || 'Atalho'}`}
                     onClick={(e) => {
                       e.stopPropagation();

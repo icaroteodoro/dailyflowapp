@@ -4,78 +4,41 @@ import { TaskRepository } from './taskRepository';
 import { ProviderFactory } from '../providers/ProviderFactory';
 import { useAppStore } from '../store/useAppStore';
 
+let running: Promise<{success: boolean; count: number; error?: string}> | null = null;
 export const SyncService = {
-  /**
-   * Executa a sincronização rigorosa com base em Workspace -> Listas -> Status
-   */
-  async syncNow(): Promise<{ success: boolean; count: number; error?: string }> {
+  syncNow(): Promise<{success: boolean; count: number; error?: string}> {
+    if (running) return running;
+    running = this.performSync().finally(() => { running = null; });
+    return running;
+  },
+  async performSync(): Promise<{success: boolean; count: number; error?: string}> {
     const store = useAppStore.getState();
+    const integration = store.integration;
+    if (!integration?.isActive) return {success: false, count: 0, error: 'Conecte uma integração nas configurações.'};
     store.setSyncing(true);
-
     try {
-      const integration = store.integration || (await SettingsRepository.getIntegration());
-      if (!integration || !integration.isActive) {
-        store.setSyncing(false);
-        return { success: false, count: 0, error: 'Nenhuma integração ativa configurada.' };
-      }
-
       const token = await KeychainService.getToken(`${integration.provider}_api_token`);
-      if (!token) {
-        store.setSyncing(false);
-        return { success: false, count: 0, error: 'Token de autenticação não encontrado no Keychain.' };
-      }
-
+      if (!token) throw new Error('Token não encontrado. Reconecte sua conta nas configurações.');
       const provider = ProviderFactory.getProvider(integration.provider);
-
-      // Load/ensure sources for the selected workspace(s)
-      let allSources = store.availableSources;
-      if (allSources.length === 0) {
-        allSources = await provider.getSources(token, integration.selectedWorkspaceIds);
-        store.setAvailableSources(allSources);
-      }
-
-      // Filter to only the sources the user explicitly selected
-      const selectedSources = allSources.filter((s) =>
-        integration.selectedSourceIds.includes(s.id)
-      );
-
-      if (selectedSources.length === 0) {
-        store.setTasks([]);
-        store.setSyncing(false);
-        return {
-          success: true,
-          count: 0,
-          error: 'Nenhuma lista selecionada para sincronização nas configurações.',
-        };
-      }
-
-      // Fetch tasks fulfilling criteria:
-      // 1. Workspaces selected
-      // 2. Lists selected
-      // 3. Assignees / User selected (User X)
-      // 4. Statuses selected
-      const remoteTasks = await provider.fetchTasks(token, selectedSources, {
-        selectedStatuses: integration.selectedStatuses,
-        selectedAssigneeIds: integration.selectedAssigneeIds,
-        hideDoneTasks: integration.hideDoneTasks ?? false,
-      });
-
-      // Update SQLite cache and active Store
-      await TaskRepository.upsertTasks(remoteTasks);
-      store.setTasks(remoteTasks);
-
-      const now = new Date().toISOString();
-      const updatedIntegration = { ...integration, lastSyncAt: now };
-      await SettingsRepository.saveIntegration(updatedIntegration);
-      store.setIntegration(updatedIntegration);
-      store.setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-
-      store.setSyncing(false);
-      return { success: true, count: remoteTasks.length };
-    } catch (error: any) {
-      console.warn('Sync failed:', error);
-      store.setSyncing(false);
-      return { success: false, count: 0, error: error.message || 'Falha na sincronização.' };
-    }
+      const sources = await provider.getSources(token, integration.selectedWorkspaceIds);
+      const selected = sources.filter(source => integration.selectedSourceIds.includes(source.id));
+      if (!selected.length) throw new Error('Nenhuma lista selecionada está disponível. Revise as configurações.');
+      const tasks = await provider.fetchTasks(token, selected, integration);
+      // Discard responses from a connection that was changed or disconnected during the request.
+      if (useAppStore.getState().integration !== integration) return {success: false, count: 0};
+      await TaskRepository.upsertTasks(tasks);
+      await TaskRepository.saveVisibleIds(tasks.map(task => task.id));
+      const updated = {...integration, lastSyncAt: new Date().toISOString()};
+      await SettingsRepository.saveIntegration(updated);
+      store.setAvailableSources(sources);
+      store.setTasks(tasks);
+      store.setIntegration(updated);
+      store.setLastSyncTime(updated.lastSyncAt);
+      return {success: true, count: tasks.length};
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.showToast({type: 'warning', title: 'Sincronização não concluída', message: `${message} Os dados locais foram mantidos.`});
+      return {success: false, count: 0, error: message};
+    } finally { store.setSyncing(false); }
   },
 };

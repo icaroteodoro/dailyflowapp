@@ -1,53 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
-
-const APP_SERVICE = 'com.dailyflow.app';
+const service = 'com.dailyflow.app';
 
 export const KeychainService = {
-  /**
-   * Armazena um token com segurança no Keychain do sistema operacional
-   */
   async saveToken(account: string, token: string): Promise<void> {
-    try {
-      await invoke('save_secure_token', {
-        service: APP_SERVICE,
-        account,
-        token,
-      });
-    } catch (error) {
-      console.warn('Keychain invoke fallback:', error);
-    }
-    // Always keep reliable local mirror
-    localStorage.setItem(`df_sec_${account}`, token);
+    await invoke('save_secure_token', { service, account, token });
+    localStorage.removeItem(`df_sec_${account}`);
   },
-
-  /**
-   * Recupera um token seguro do Keychain
-   */
   async getToken(account: string): Promise<string | null> {
-    try {
-      const token = await invoke<string | null>('get_secure_token', {
-        service: APP_SERVICE,
-        account,
-      });
-      if (token) return token;
-    } catch (error) {
-      console.warn('Keychain get fallback:', error);
+    const token = await invoke<string | null>('get_secure_token', { service, account });
+    const legacy = localStorage.getItem(`df_sec_${account}`);
+    if (legacy) {
+      if (!token) await this.saveToken(account, legacy);
+      localStorage.removeItem(`df_sec_${account}`);
     }
-    return localStorage.getItem(`df_sec_${account}`);
+    return token || legacy;
   },
-
-  /**
-   * Remove o token com segurança do Keychain
-   */
   async deleteToken(account: string): Promise<void> {
-    try {
-      await invoke('delete_secure_token', {
-        service: APP_SERVICE,
-        account,
-      });
-    } catch {
-      // ignore
-    }
+    await invoke('delete_secure_token', { service, account });
     localStorage.removeItem(`df_sec_${account}`);
   },
 };

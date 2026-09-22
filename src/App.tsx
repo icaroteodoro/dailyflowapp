@@ -1,6 +1,9 @@
 import React, { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
-import { initialTasks } from './services/mockTasks';
+import { SyncService } from './services/syncService';
+import { SettingsRepository } from './services/settingsRepository';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { DrawerHandle } from './components/DrawerHandle';
 import { Header } from './components/Header';
 import { MyDayView } from './components/MyDayView';
@@ -14,10 +17,7 @@ export const App: React.FC = () => {
   const {
     isExpanded,
     setIsExpanded,
-    toggleExpanded,
     activeTab,
-    setTasks,
-    addToMyDay,
     selectedTaskForDetail,
     setSelectedTaskForDetail,
     isQuickCreateOpen,
@@ -27,18 +27,31 @@ export const App: React.FC = () => {
     hideToast,
   } = useAppStore();
 
-  // Initialize initial data on first render (SQLite local-first)
   useEffect(() => {
+    let disposed = false;
+    const report = (error: unknown) => useAppStore.getState().showToast({type: 'error', title: 'Não foi possível aplicar as preferências', message: String(error)});
+    const refresh = async () => {
+      await useAppStore.getState().refreshDay();
+      if (useAppStore.getState().integration) await SyncService.syncNow();
+    };
     async function init() {
       await loadLocalData();
-      const state = useAppStore.getState();
-      // Only load initial mock demonstration tasks if user has NO integration AND no tasks
-      if (state.tasks.length === 0 && !state.integration) {
-        setTasks(initialTasks);
-        addToMyDay([initialTasks[0].id, initialTasks[2].id]);
-      }
+      if (disposed) return;
+      try {
+        const prefs = await SettingsRepository.getAppPreferences();
+        await invoke('apply_preferences', {...prefs});
+      } catch (error) { report(error); }
+      await refresh();
     }
-    init();
+    void init().catch(report);
+    const timer = setInterval(() => { void refresh().catch(report); }, 60000);
+    const onFocus = () => { void refresh().catch(report); };
+    window.addEventListener('focus', onFocus);
+    const unlisten = listen<boolean>('drawer-state', event => useAppStore.setState({isExpanded: event.payload}));
+    return () => {
+      disposed = true; clearInterval(timer); window.removeEventListener('focus', onFocus);
+      void unlisten.then(fn => fn());
+    };
   }, []);
 
   // Global Keyboard shortcuts
@@ -53,11 +66,7 @@ export const App: React.FC = () => {
           setIsExpanded(false);
         }
       }
-      // Cmd + Shift + D or Ctrl + Shift + D to toggle drawer
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        toggleExpanded();
-      }
+
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -70,8 +79,8 @@ export const App: React.FC = () => {
       <DrawerHandle />
 
       {/* Main Drawer Container */}
-      {isExpanded && (
-        <div className="w-full h-full flex flex-col bg-[#09090b] shadow-2xl border-l border-white/10 rounded-l-2xl overflow-hidden animate-in fade-in slide-in-from-right duration-200 relative">
+      {(
+        <div style={{ display: isExpanded ? 'flex' : 'none' }} className="w-full h-full flex flex-col bg-[#09090b] shadow-2xl border-l border-white/10 rounded-l-2xl overflow-hidden animate-in fade-in slide-in-from-right duration-200 relative">
           {/* Header */}
           <Header />
 
@@ -97,7 +106,7 @@ export const App: React.FC = () => {
                 <div className="mt-0.5 flex-shrink-0">
                   {toast.type === 'success' ? (
                     <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
-                  ) : toast.type === 'warning' ? (
+                  ) : toast.type === 'warning' || toast.type === 'error' ? (
                     <AlertTriangle className="w-4 h-4 text-amber-400" />
                   ) : (
                     <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -120,7 +129,7 @@ export const App: React.FC = () => {
           )}
 
           {/* Modals & Drawers */}
-          <TaskDetailModal />
+          <TaskDetailModal key={selectedTaskForDetail?.id || 'closed'} />
           <QuickCreateTaskModal />
         </div>
       )}

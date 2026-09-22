@@ -1,8 +1,6 @@
 import { CompletionShortcut, ExternalTask } from '../types';
 import { KeychainService } from './keychain';
 import { ProviderFactory } from '../providers/ProviderFactory';
-import { TaskRepository } from './taskRepository';
-import { DailyPlanRepository } from './dailyPlanRepository';
 
 export interface CompletionResult {
   success: boolean;
@@ -60,62 +58,27 @@ export const CompletionService = {
   ): Promise<CompletionResult> {
     const targetStatus = shortcut.targetStatus || 'COMPLETE';
     const commentToSend = this.formatComment(shortcut.commentTemplate, task, shortcut);
-    const today = new Date().toISOString().split('T')[0];
-
-    // 1. Atualização local persistente (SQLite)
+    let updatedStatus = task.status.name;
     try {
-      await TaskRepository.updateStatus(task.id, targetStatus);
-      await DailyPlanRepository.toggleCompleteLocally(today, task.id, true);
-    } catch (e) {
-      console.warn('Erro ao atualizar SQLite localmente:', e);
-    }
-
-    // 2. Envio remoto ao Provedor (ClickUp)
-    let remoteSuccess = false;
-    let remoteError: string | null = null;
-
-    try {
-      const token = await KeychainService.getToken(`${task.provider}_api_token`);
-      if (token) {
-        const provider = ProviderFactory.getProvider(task.provider);
-        
-        // Disparar atualização de status no ClickUp
-        await provider.updateTaskStatus(token, task.externalId, targetStatus);
-
-        // Disparar comentário com menção formal no ClickUp
-        if (commentToSend) {
-          await provider.createComment(token, task.externalId, commentToSend, {
-            notifyAssigneeId: shortcut.assigneeToMentionId,
-            assigneeName: shortcut.assigneeToMentionName,
-          });
-        }
-        remoteSuccess = true;
+      if (!shortcut.isEnabled) throw new Error('Automação desativada.');
+      if (!task.availableStatuses.some(status => status.name.toLowerCase() === targetStatus.toLowerCase())) {
+        throw new Error('O status da automação não existe nesta lista. Revise as configurações.');
       }
-    } catch (e: any) {
-      console.warn('Não foi possível sincronizar com o ClickUp remotamente:', e);
-      remoteError = e.message;
-    }
-
-    if (remoteSuccess) {
-      return {
-        success: true,
-        message: `Tarefa finalizada! Status alterado para "${targetStatus}"${
-          shortcut.assigneeToMentionName ? ` e @${shortcut.assigneeToMentionName} notificado` : ''
-        }.`,
-        updatedStatus: targetStatus,
-        commentSent: commentToSend,
-        mentionedUser: shortcut.assigneeToMentionName,
-      };
-    } else {
-      return {
-        success: true, // Localmente foi um sucesso
-        message: `Tarefa finalizada localmente (${targetStatus}).${
-          remoteError ? ' (Sincronização remota pendente/offline)' : ''
-        }`,
-        updatedStatus: targetStatus,
-        commentSent: commentToSend,
-        mentionedUser: shortcut.assigneeToMentionName,
-      };
+      const token = await KeychainService.getToken(`${task.provider}_api_token`);
+      if (!token) throw new Error('Conecte sua conta antes de executar a automação.');
+      const provider = ProviderFactory.getProvider(task.provider);
+      await provider.updateTaskStatus(token, task.externalId, targetStatus);
+      updatedStatus = targetStatus;
+      await provider.createComment(token, task.externalId, commentToSend, {
+        notifyAssigneeId: shortcut.assigneeToMentionId,
+        assigneeName: shortcut.assigneeToMentionName,
+      });
+      return { success: true, updatedStatus, message: 'Status atualizado e comentário enviado ao ClickUp.', commentSent: commentToSend };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, updatedStatus, message: updatedStatus !== task.status.name
+        ? `Status atualizado, mas o comentário não foi confirmado. Confira o ClickUp antes de reenviar. ${message}`
+        : `Automação não confirmada. Confira o ClickUp antes de tentar novamente. ${message}` };
     }
   },
 };

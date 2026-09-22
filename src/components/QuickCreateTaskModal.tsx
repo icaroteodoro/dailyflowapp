@@ -1,91 +1,52 @@
 import React, { useState } from 'react';
 import { X, Plus, CheckCircle } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { ExternalTask } from '../types';
+import { TaskRepository } from '../services/taskRepository';
 import { KeychainService } from '../services/keychain';
 import { ProviderFactory } from '../providers/ProviderFactory';
 
 export const QuickCreateTaskModal: React.FC = () => {
-  const { isQuickCreateOpen, setIsQuickCreateOpen, tasks, setTasks, addToMyDay } = useAppStore();
+  const { isQuickCreateOpen, setIsQuickCreateOpen, integration, availableSources: sources, setTasks, addToMyDay, showToast } = useAppStore();
   
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedSource, setSelectedSource] = useState('Sprint 14');
+  const [selectedSource, setSelectedSource] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [addImmediatelyToMyDay, setAddImmediatelyToMyDay] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isQuickCreateOpen) return null;
 
-  // Extract unique source names
-  const availableSources = Array.from(new Set(tasks.map((t) => t.sourceName)));
-  if (availableSources.length === 0) {
-    availableSources.push('Sprint 14', 'Backlog Produto', 'Bugs Críticos');
-  }
+  const availableSources = sources.filter(source => integration?.selectedSourceIds.includes(source.id));
+  const sourceId = availableSources.some(source => source.id === selectedSource) ? selectedSource : availableSources[0]?.id || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-
+    if (!title.trim() || isSubmitting || !integration || !sourceId) return;
     setIsSubmitting(true);
-
-    let createdTask: ExternalTask | null = null;
-
+    let created = false;
     try {
-      const token = await KeychainService.getToken('clickup_api_token');
-      if (token) {
-        const provider = ProviderFactory.getProvider('clickup');
-        // Find matching source id if available
-        const matchingTask = tasks.find((t) => t.sourceName === selectedSource);
-        const listId = matchingTask?.sourceId || 'list_1';
-
-        createdTask = await provider.createTask(token, {
-          listId,
-          title: title.trim(),
-          description: description.trim() || undefined,
-          dueDate: dueDate.trim() || undefined,
-        });
-      }
-    } catch (err) {
-      console.warn('Could not create on ClickUp API directly, creating in local cache:', err);
-    }
-
-    if (!createdTask) {
-      createdTask = {
-        id: `task_${Date.now()}`,
-        externalId: `${Date.now()}`,
-        provider: 'clickup',
-        title: title.trim(),
-        description: description.trim() || undefined,
-        status: {
-          id: 'to_do',
-          name: 'TO DO',
-          color: '#87909e',
-          isDone: false,
-        },
-        availableStatuses: [
-          { id: 'to_do', name: 'TO DO', color: '#87909e' },
-          { id: 'in_progress', name: 'IN PROGRESS', color: '#3b82f6' },
-          { id: 'done', name: 'DONE', color: '#10b981', isDone: true },
-        ],
-        sourceId: 'list_1',
-        sourceName: selectedSource,
-        dueDate: dueDate || undefined,
-        url: 'https://app.clickup.com',
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    setTasks([createdTask, ...tasks]);
-    if (addImmediatelyToMyDay) {
-      addToMyDay([createdTask.id]);
-    }
-
-    setIsSubmitting(false);
-    setIsQuickCreateOpen(false);
-    setTitle('');
-    setDescription('');
-    setDueDate('');
+      const token = await KeychainService.getToken(`${integration.provider}_api_token`);
+      if (!token) throw new Error('Reconecte sua conta nas configurações.');
+      const source = availableSources.find(source => source.id === sourceId)!;
+      const provider = ProviderFactory.getProvider(integration.provider);
+      const task = await provider.createTask(token, {listId: sourceId, title: title.trim(), description: description.trim() || undefined, dueDate: dueDate || undefined});
+      created = true;
+      const createdTask = {...task, workspaceId: source.workspaceId, workspaceName: source.workspaceName,
+        spaceId: source.spaceId, spaceName: source.spaceName, folderId: source.folderId, folderName: source.folderName,
+        availableStatuses: source.statuses || [task.status]};
+      await TaskRepository.upsertTasks([createdTask]);
+      const tasks = [createdTask, ...useAppStore.getState().tasks.filter(t => t.id !== task.id)];
+      await TaskRepository.saveVisibleIds(tasks.map(task => task.id));
+      setTasks(tasks);
+      if (addImmediatelyToMyDay) await addToMyDay([createdTask.id]);
+      setIsQuickCreateOpen(false);
+      setTitle(''); setDescription(''); setDueDate('');
+      showToast({type: 'success', title: 'Tarefa criada no ClickUp'});
+    } catch (error) {
+      if (created) setIsQuickCreateOpen(false);
+      showToast({type: 'error', title: created ? 'Tarefa criada, mas falhou ao salvar localmente. Sincronize novamente.' : 'Criação não confirmada. Confira o ClickUp antes de tentar novamente.', message: String(error)});
+    } finally { setIsSubmitting(false); }
   };
 
   return (
@@ -112,6 +73,7 @@ export const QuickCreateTaskModal: React.FC = () => {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-4 space-y-3">
+          {!sourceId && <p className="text-xs text-amber-300">Conecte sua conta e selecione listas nas configurações.</p>}
           <div>
             <label className="text-[11px] font-medium text-zinc-300 block mb-1">
               Título da tarefa *
@@ -132,13 +94,13 @@ export const QuickCreateTaskModal: React.FC = () => {
               Lista de destino (ClickUp)
             </label>
             <select
-              value={selectedSource}
+              value={sourceId}
               onChange={(e) => setSelectedSource(e.target.value)}
               className="w-full px-3 py-2 bg-zinc-950 border border-white/10 rounded-xl text-xs text-zinc-200 focus:outline-none focus:border-zinc-400 cursor-pointer"
             >
               {availableSources.map((s) => (
-                <option key={s} value={s} className="bg-zinc-900">
-                  {s}
+                <option key={s.id} value={s.id} className="bg-zinc-900">
+                  {[s.workspaceName, s.spaceName, s.folderName, s.name].filter(Boolean).join(' › ')}
                 </option>
               ))}
             </select>
@@ -162,10 +124,9 @@ export const QuickCreateTaskModal: React.FC = () => {
               Prazo (opcional)
             </label>
             <input
-              type="text"
+              type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              placeholder="Ex: Hoje, Amanhã, 18:00"
               className="w-full px-3 py-2 bg-zinc-950 border border-white/10 rounded-xl text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400"
             />
           </div>
@@ -193,7 +154,7 @@ export const QuickCreateTaskModal: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !title.trim()}
+              disabled={isSubmitting || !title.trim() || !sourceId || !integration}
               className="px-4 py-1.5 bg-zinc-100 hover:bg-white disabled:opacity-50 text-zinc-950 font-bold rounded-xl text-xs transition-all shadow-md active:scale-95 flex items-center gap-1.5"
             >
               <CheckCircle className="w-3.5 h-3.5" />

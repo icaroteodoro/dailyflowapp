@@ -65,7 +65,7 @@ export const Header: React.FC = () => {
             className={`p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-all cursor-pointer ${
               isSyncing ? 'animate-spin text-zinc-200' : ''
             }`}
-            title={lastSyncTime ? `Última sincronização às ${lastSyncTime}` : 'Sincronizar agora'}
+            title={lastSyncTime ? `Última sincronização: ${new Date(lastSyncTime).toLocaleString('pt-BR')}` : 'Sincronizar agora'}
           >
             <RefreshCw className="w-4 h-4" />
           </button>

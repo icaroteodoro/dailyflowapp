@@ -39,12 +39,13 @@ export const SettingsView: React.FC = () => {
     integration,
     setIntegration,
     isSyncing,
-    availableSources,
-    setAvailableSources,
+    availableSources: savedSources,
+    setAvailableSources: setSavedSources,
     completionShortcut,
     setCompletionShortcut,
   } = useAppStore();
 
+  const [availableSources, setAvailableSources] = useState<TaskSource[]>(savedSources);
   const [token, setToken] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -145,7 +146,7 @@ export const SettingsView: React.FC = () => {
       setAutostart(prefs.autostart);
       setGlobalShortcut(prefs.globalShortcut);
     }
-    loadData();
+    loadData().catch(error => setErrorMessage(String(error)));
   }, [integration?.id]);
 
   // --- Step 1: Validate & Load Workspaces ---
@@ -156,6 +157,7 @@ export const SettingsView: React.FC = () => {
     setIsValidating(true);
     setErrorMessage(null);
 
+    try {
     const cleanToken = token.trim();
     const provider = ProviderFactory.getProvider('clickup');
     const result = await provider.validateToken(cleanToken);
@@ -179,6 +181,7 @@ export const SettingsView: React.FC = () => {
 
     setIsValidating(false);
     setWizardStep(1); // Move to Step 1: Workspaces
+    } catch (error) { setErrorMessage(String(error)); } finally { setIsValidating(false); }
   };
 
   const handleOpenWorkspacesStep = async () => {
@@ -223,10 +226,11 @@ export const SettingsView: React.FC = () => {
       });
       setExpandedSpaces(spaceMap);
 
-      if (selectedSourceIds.length === 0) {
-        // Select all lists by default initially
-        setSelectedSourceIds(sources.map((s) => s.id));
-      }
+      setSelectedSourceIds(previous => {
+        const valid = previous.filter(id => sources.some(source => source.id === id));
+        return valid.length ? valid : sources.map(source => source.id);
+      });
+      setSelectedStatuses([]);
 
       setWizardStep(2); // Move to Step 2: Lists
     } catch (e: any) {
@@ -258,7 +262,7 @@ export const SettingsView: React.FC = () => {
       setCurrentUser(user);
 
       // If no assignee selected yet and user exists, pre-select current user by default
-      if (selectedAssigneeIds.length === 0 && user) {
+      if (!integration && selectedAssigneeIds.length === 0 && user) {
         setSelectedAssigneeIds([user.id]);
       }
 
@@ -304,7 +308,7 @@ export const SettingsView: React.FC = () => {
 
     if (selectedStatuses.length === 0) {
       // By default select non-done statuses
-      const activeStatuses = allStatuses.filter((st) => !['DONE', 'CLOSED', 'COMPLETE'].includes(st));
+      const activeStatuses = Array.from(new Set(selectedSources.flatMap(source => (source.statuses || []).filter(status => !status.isDone).map(status => status.name.toUpperCase()))));
       setSelectedStatuses(activeStatuses.length > 0 ? activeStatuses : allStatuses);
     }
 
@@ -313,6 +317,7 @@ export const SettingsView: React.FC = () => {
 
   // --- Finalize Setup & Save ---
   const handleFinishSetup = async () => {
+    if (isSyncing) { setErrorMessage('Aguarde a sincronização em andamento terminar.'); return; }
     if (selectedStatuses.length === 0) {
       setErrorMessage('Por favor, selecione pelo menos um status.');
       return;
@@ -364,36 +369,35 @@ export const SettingsView: React.FC = () => {
       selectedAssigneeNames,
       selectedStatuses,
       hideDoneTasks,
-      lastSyncAt: new Date().toISOString(),
+      lastSyncAt: integration?.lastSyncAt ?? null,
     };
 
-    await SettingsRepository.saveIntegration(config);
-    setIntegration(config);
-
-    // Trigger sync
-    await SyncService.syncNow();
-
-    setIsLoadingStep(false);
-    setWizardStep(0); // Show summary
-    setFeedbackMessage('Configuração concluída e tarefas sincronizadas com sucesso!');
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    try {
+      await SettingsRepository.saveIntegration(config);
+      setSavedSources(availableSources);
+      setIntegration(config);
+      const result = await SyncService.syncNow();
+      if (!result.success) {
+        setErrorMessage(result.error || 'Sincronização não concluída. Tente novamente.');
+        return;
+      }
+      setWizardStep(0);
+      setFeedbackMessage('Configuração concluída e tarefas sincronizadas com sucesso!');
+      setTimeout(() => setFeedbackMessage(null), 4000);
+    } catch (error) { setErrorMessage(String(error)); }
+    finally { setIsLoadingStep(false); }
   };
 
   const handleDisconnect = async () => {
-    await KeychainService.deleteToken('clickup_api_token');
-    if (integration) {
-      await SettingsRepository.deleteIntegration(integration.id);
-    }
-    setToken('');
-    setIntegration(null);
-    setAvailableSources([]);
-    setSelectedWorkspaceIds([]);
-    setSelectedSourceIds([]);
-    setSelectedAssigneeIds([]);
-    setSelectedStatuses([]);
-    setWizardStep(0);
-    setFeedbackMessage('Integração desconectada com sucesso.');
-    setTimeout(() => setFeedbackMessage(null), 2500);
+    if (isSyncing) { setErrorMessage('Aguarde a sincronização terminar antes de desconectar.'); return; }
+    try {
+      await KeychainService.deleteToken('clickup_api_token');
+      if (integration) await SettingsRepository.deleteIntegration(integration.id);
+      setToken(''); setIntegration(null); setAvailableSources([]); setSavedSources([]);
+      useAppStore.setState({tasks: [], dailyPlanItems: [], selectedTaskForDetail: null, selectedTaskIdsForMyDay: new Set(), lastSyncTime: null});
+      setSelectedWorkspaceIds([]); setSelectedSourceIds([]); setSelectedAssigneeIds([]); setSelectedStatuses([]);
+      setWizardStep(0); setFeedbackMessage('Integração desconectada.');
+    } catch (error) { setErrorMessage(String(error)); }
   };
 
   // Helpers for Assignees
@@ -581,7 +585,7 @@ export const SettingsView: React.FC = () => {
               <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                 <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
                 <span>
-                  Etapa 1 de 3: Selecione os Workspaces ({selectedWorkspaceIds.length}/{availableWorkspaces.length})
+                  Etapa 1 de 4: Selecione os Workspaces ({selectedWorkspaceIds.length}/{availableWorkspaces.length})
                 </span>
               </span>
               {availableWorkspaces.length > 1 && (
@@ -652,7 +656,7 @@ export const SettingsView: React.FC = () => {
             <div className="flex items-center justify-between border-b border-white/5 pb-2">
               <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Etapa 2 de 3: Selecione as Listas</span>
+                <span>Etapa 2 de 4: Selecione as Listas</span>
               </span>
               <span className="text-[10px] text-zinc-400 font-medium">
                 {selectedSourceIds.length} selecionada(s)
@@ -1460,10 +1464,12 @@ export const SettingsView: React.FC = () => {
                     commentTemplate: shortcutCommentTemplate.trim() || 'Tarefa finalizada com sucesso! 🚀',
                     isEnabled: shortcutEnabled,
                   };
+                  try {
                   await setCompletionShortcut(updated);
                   setIsSavingShortcut(false);
                   setShortcutSavedMessage('Automação salva com sucesso!');
                   setTimeout(() => setShortcutSavedMessage(null), 3000);
+                  } catch (error) { setErrorMessage(String(error)); } finally { setIsSavingShortcut(false); }
                 }}
                 disabled={isSavingShortcut}
                 className="bg-orange-500 hover:bg-orange-400 text-zinc-950 font-bold text-xs py-1.5 px-3.5 rounded-xl transition-all shadow-md shadow-orange-500/20 flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
@@ -1520,10 +1526,12 @@ export const SettingsView: React.FC = () => {
             type="button"
             onClick={async () => {
               setIsSavingPrefs(true);
+              try {
               await SettingsRepository.saveAppPreferences({ autostart, globalShortcut });
               setIsSavingPrefs(false);
               setPrefsSavedMessage('Preferências salvas com sucesso!');
               setTimeout(() => setPrefsSavedMessage(null), 3000);
+              } catch (error) { setErrorMessage(String(error)); } finally { setIsSavingPrefs(false); }
             }}
             disabled={isSavingPrefs}
             className="bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs py-1.5 px-3 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"

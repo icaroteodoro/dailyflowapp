@@ -8,8 +8,8 @@ on:
     inputs:
       version:
         description: 'Version tag (e.g. v0.1.0)'
-        required: false
-        default: 'v0.1.0'
+        required: true
+        default: 'v0.2.1'
 
 permissions:
   contents: write
@@ -25,6 +25,9 @@ jobs:
           - platform: macos-latest
             targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            targets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
           - platform: windows-latest
             targets: ''
             args: ''
@@ -38,7 +41,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install Rust Stable
@@ -47,15 +50,18 @@ jobs:
           targets: ${{ matrix.targets }}
 
       - name: Install Frontend Dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Run Regression Tests
+        run: npm test
 
       - name: Build Tauri Application
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name || inputs.version || 'v0.1.0' }}
-          releaseName: DailyFlow ${{ github.ref_name || inputs.version || 'v0.1.0' }}
+          tagName: ${{ inputs.version || github.ref_name }}
+          releaseName: DailyFlow ${{ inputs.version || github.ref_name }}
           releaseBody: |
             ## DailyFlow Release 🚀
             
